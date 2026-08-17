@@ -18,6 +18,10 @@ import {
   winnerCommitment,
   parseHelperEvents,
 } from "../utils/campaigns";
+import CampaignRegistrySierra from "../contracts/CampaignRegistry.sierra.json";
+import CampaignRegistryCasm from "../contracts/CampaignRegistry.casm.json";
+import PayoutHelperSierra from "../contracts/PayoutHelper.sierra.json";
+import PayoutHelperCasm from "../contracts/PayoutHelper.casm.json";
 
 // ─── formatting helpers ──────────────────────────────────────────────────────
 
@@ -113,6 +117,26 @@ export default function Page() {
   const [results, setResults] = useState<Record<number, ActionResult>>({});
   const [busy, setBusy] = useState<Record<number, string>>({});
 
+  // deployment
+  type Deployed = { registry: string; helper: string };
+  const [deployed, setDeployed] = useState<Deployed>(() => {
+    if (typeof window === "undefined") return { registry: "0x0", helper: "0x0" };
+    try {
+      const raw = localStorage.getItem("gameshield.addresses");
+      if (raw) {
+        const p = JSON.parse(raw);
+        return { registry: p.registry ?? "0x0", helper: p.helper ?? "0x0" };
+      }
+    } catch {
+      /* ignore */
+    }
+    return { registry: "0x0", helper: "0x0" };
+  });
+  const [deployState, setDeployState] = useState("");
+  const [deployResult, setDeployResult] = useState<ActionResult | null>(null);
+  const [manualRegistry, setManualRegistry] = useState("");
+  const [manualHelper, setManualHelper] = useState("");
+
   const setResult = (id: number, r: ActionResult) =>
     setResults((prev) => ({ ...prev, [id]: r }));
 
@@ -125,8 +149,21 @@ export default function Page() {
     });
 
   const provider = constants.myFrontendProviders[myFrontendProviderIndex];
-  const registry = constants.RegistryAddress;
-  const helper = constants.HelperAddress;
+  const resolveAddr = (envAddr: string, storedAddr?: string) => {
+    try {
+      if (envAddr && num.toBigInt(envAddr) !== 0n) return envAddr;
+    } catch {
+      /* fall through */
+    }
+    try {
+      if (storedAddr && num.toBigInt(storedAddr) !== 0n) return storedAddr;
+    } catch {
+      /* fall through */
+    }
+    return "0x0";
+  };
+  const registry = resolveAddr(constants.RegistryAddress, deployed.registry);
+  const helper = resolveAddr(constants.HelperAddress, deployed.helper);
   const hasContracts = (() => {
     try {
       return num.toBigInt(registry) !== 0n && num.toBigInt(helper) !== 0n;
@@ -249,6 +286,98 @@ export default function Page() {
   }
 
   // ─── actions ──────────────────────────────────────────────────────────────
+
+  // Declare + deploy both contracts with the connected wallet, then link the
+  // helper to the registry. All steps are separate wallet transactions.
+  const saveDeployed = (next: Deployed) => {
+    setDeployed(next);
+    try {
+      localStorage.setItem("gameshield.addresses", JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handleSaveManual = () => {
+    try {
+      const reg = validateAndParseAddress(manualRegistry);
+      const hel = validateAndParseAddress(manualHelper);
+      saveDeployed({ registry: reg, helper: hel });
+      setDeployResult({
+        status: "ok",
+        title: "Addresses saved",
+        rows: [
+          { label: "Registry", value: reg },
+          { label: "Helper", value: hel },
+        ],
+      });
+    } catch {
+      setDeployResult(errorResult("Enter two valid Starknet addresses (0x…)."));
+    }
+  };
+
+  const handleDeploy = async () => {
+    if (!myWalletAccount || !connectedAddress) {
+      setDeployResult(errorResult("Connect a wallet first."));
+      return;
+    }
+    const wait = (h: string) =>
+      provider.waitForTransaction(h, { retries: 400, retryInterval: 3000 });
+    try {
+      setDeployResult(null);
+
+      setDeployState("Declaring CampaignRegistry…");
+      const d1 = await myWalletAccount.declare({
+        contract: { sierra: CampaignRegistrySierra, casm: CampaignRegistryCasm },
+      } as any);
+      await wait(d1.transaction_hash);
+      const registryClassHash = d1.class_hash;
+
+      setDeployState("Deploying CampaignRegistry…");
+      const dep1 = await myWalletAccount.deploy({
+        classHash: registryClassHash,
+        constructorCalldata: [validateAddr(connectedAddress)],
+      } as any);
+      const registryAddress = dep1.contract_address as unknown as string;
+      await wait(dep1.transaction_hash);
+
+      setDeployState("Declaring PayoutHelper…");
+      const d2 = await myWalletAccount.declare({
+        contract: { sierra: PayoutHelperSierra, casm: PayoutHelperCasm },
+      } as any);
+      await wait(d2.transaction_hash);
+      const helperClassHash = d2.class_hash;
+
+      setDeployState("Deploying PayoutHelper…");
+      const dep2 = await myWalletAccount.deploy({
+        classHash: helperClassHash,
+        constructorCalldata: [constants.PoolAddress, registryAddress],
+      } as any);
+      const helperAddress = dep2.contract_address as unknown as string;
+      await wait(dep2.transaction_hash);
+
+      setDeployState("Linking helper to registry…");
+      const link = await myWalletAccount.execute([
+        { contractAddress: registryAddress, entrypoint: "set_helper", calldata: [helperAddress] },
+      ] as any);
+      await wait(link.transaction_hash);
+
+      saveDeployed({ registry: registryAddress, helper: helperAddress });
+      setDeployResult({
+        status: "ok",
+        title: "Contracts deployed and linked",
+        rows: [
+          { label: "Registry", value: registryAddress },
+          { label: "Helper", value: helperAddress },
+        ],
+        note: "Saved in this browser. Copy these addresses into .env (NEXT_PUBLIC_REGISTRY_ADDRESS / NEXT_PUBLIC_HELPER_ADDRESS) so all users see the same contracts.",
+      });
+    } catch (e: any) {
+      setDeployResult(errorResult(e?.message ?? e?.toString?.() ?? String(e)));
+    } finally {
+      setDeployState("");
+    }
+  };
 
   const handleCreate = async () => {
     setResultCreate(null);
@@ -489,6 +618,47 @@ export default function Page() {
       </header>
 
       <main className={styles.main}>
+        {/* Deploy / configure contracts */}
+        <section className={styles.section}>
+          <h2 className={styles.sectionTitle}>Contracts</h2>
+          <div className={styles.hint}>
+            One-time setup on Mainnet (the STRK20 pool lives there). Deploy with your wallet
+            or paste already-deployed addresses.
+          </div>
+          <div className={styles.formRow}>
+            <button
+              className={styles.btnCta}
+              onClick={handleDeploy}
+              disabled={!isConnected || deployState !== ""}
+            >
+              {deployState !== "" ? deployState : "Deploy contracts"}
+            </button>
+            <span className={styles.hint}>
+              {hasContracts
+                ? `registry ${shortHex(registry)} · helper ${shortHex(helper)}`
+                : "not deployed yet"}
+            </span>
+          </div>
+          <div className={styles.formRow}>
+            <input
+              className={styles.input}
+              placeholder="Registry address 0x…"
+              value={manualRegistry}
+              onChange={(e) => setManualRegistry(e.target.value)}
+            />
+            <input
+              className={styles.input}
+              placeholder="Helper address 0x…"
+              value={manualHelper}
+              onChange={(e) => setManualHelper(e.target.value)}
+            />
+            <button className={`${styles.btn} ${styles.btnSmall}`} onClick={handleSaveManual}>
+              Save
+            </button>
+          </div>
+          {deployResult ? <ResultCard r={deployResult} /> : null}
+        </section>
+
         {!hasContracts ? (
           <div className={styles.warn}>
             Contracts not configured. Deploy CampaignRegistry + PayoutHelper and set
