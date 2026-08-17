@@ -640,15 +640,31 @@ export default function Page() {
       {
         contractAddress: registry,
         entrypoint: "create_campaign",
-        calldata: [reward.toString(16), deadline.toString(16), criteriaHash],
+        calldata: [num.toHex(reward), num.toHex(deadline), criteriaHash],
       },
     ];
+    setResultCreate({
+      status: "pending",
+      title: "Checking campaign contract…",
+      note: "Running a read-only Mainnet simulation before opening the wallet.",
+    });
+    try {
+      await provider.callContract(calls[0]);
+    } catch (e: any) {
+      setResultCreate(errorResult(`Campaign contract simulation failed: ${e?.message ?? String(e)}`));
+      return;
+    }
     let txH: string;
     try {
       const r = await myWalletAccount.execute(calls as any);
       txH = r.transaction_hash;
     } catch (e: any) {
-      setResultCreate(errorResult(e?.message ?? e?.toString?.() ?? String(e)));
+      const message = e?.message ?? e?.toString?.() ?? String(e);
+      setResultCreate(errorResult(
+        `The campaign contract simulation succeeded, but the wallet did not submit the transaction. ` +
+        `Ready X fee review can fail for newly deployed custom contracts. Reload, reconnect on Mainnet, ` +
+        `and retry; if it repeats, use another compatible Starknet wallet. Wallet error: ${message}`
+      ));
       return;
     }
     setResultCreate({
