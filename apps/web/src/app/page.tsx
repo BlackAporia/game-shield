@@ -392,6 +392,31 @@ export default function Page() {
     }
     const wait = (h: string) =>
       provider.waitForTransaction(h, { retries: 400, retryInterval: 3000 });
+    // WalletAccountV5.deploy may return contract_address as string[].
+    const pickAddr = (v: unknown): string => {
+      if (Array.isArray(v)) return String(v[0]);
+      return String(v);
+    };
+    const verifyDeclared = async (classHash: string, label: string) => {
+      try {
+        await provider.getClass(classHash);
+      } catch {
+        throw new Error(`${label}: the wallet did not declare our class. Declared class hash (${classHash}) is not on-chain.`);
+      }
+    };
+    const verifyDeployed = async (addr: string, classHash: string, label: string) => {
+      try {
+        const at = await provider.getClassHashAt(addr);
+        if (num.toHex(at) !== num.toHex(classHash)) {
+          throw new Error(
+            `${label}: class at ${addr} is ${num.toHex(at)} but we deployed ${num.toHex(classHash)} — the wallet returned the wrong address.`
+          );
+        }
+      } catch (e: any) {
+        if (e?.message?.includes("class at")) throw e;
+        throw new Error(`${label}: cannot verify deployment at ${addr} — ${e?.message ?? e}`);
+      }
+    };
     try {
       setDeployResult(null);
 
@@ -401,14 +426,16 @@ export default function Page() {
       } as any);
       await wait(d1.transaction_hash);
       const registryClassHash = d1.class_hash;
+      await verifyDeclared(registryClassHash, "CampaignRegistry");
 
       setDeployState("Deploying CampaignRegistry…");
       const dep1 = await myWalletAccount.deploy({
         classHash: registryClassHash,
         constructorCalldata: [validateAddr(connectedAddress)],
       } as any);
-      const registryAddress = dep1.contract_address as unknown as string;
+      const registryAddress = pickAddr(dep1.contract_address);
       await wait(dep1.transaction_hash);
+      await verifyDeployed(registryAddress, registryClassHash, "CampaignRegistry");
 
       setDeployState("Declaring PayoutHelper…");
       const d2 = await myWalletAccount.declare({
@@ -416,14 +443,16 @@ export default function Page() {
       } as any);
       await wait(d2.transaction_hash);
       const helperClassHash = d2.class_hash;
+      await verifyDeclared(helperClassHash, "PayoutHelper");
 
       setDeployState("Deploying PayoutHelper…");
       const dep2 = await myWalletAccount.deploy({
         classHash: helperClassHash,
         constructorCalldata: [constants.PoolAddress, registryAddress],
       } as any);
-      const helperAddress = dep2.contract_address as unknown as string;
+      const helperAddress = pickAddr(dep2.contract_address);
       await wait(dep2.transaction_hash);
+      await verifyDeployed(helperAddress, helperClassHash, "PayoutHelper");
 
       setDeployState("Linking helper to registry…");
       const link = await myWalletAccount.execute([
@@ -439,7 +468,7 @@ export default function Page() {
           { label: "Registry", value: registryAddress },
           { label: "Helper", value: helperAddress },
         ],
-        note: "Saved in this browser. Copy these addresses into .env (NEXT_PUBLIC_REGISTRY_ADDRESS / NEXT_PUBLIC_HELPER_ADDRESS) so all users see the same contracts.",
+        note: "Verified on-chain: both classes declared and deployed at the addresses above. Copy them into .env (NEXT_PUBLIC_REGISTRY_ADDRESS / NEXT_PUBLIC_HELPER_ADDRESS) so all users see the same contracts.",
       });
     } catch (e: any) {
       setDeployResult(errorResult(e?.message ?? e?.toString?.() ?? String(e)));
