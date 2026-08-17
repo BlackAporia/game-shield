@@ -42,12 +42,12 @@ pool withdraws input token to helper → helper runs arbitrary logic → helper 
 
 Two Cairo contracts (Scarb + Starknet Foundry):
 
-1. `campaign_registry.cairo` — public campaign state: create campaign (deadline, reward amount, payout criteria hash), bind funding, approve payout entitlement, complete/cancel with refund; access control; replay protection. Emits events for every lifecycle step.
+1. `campaign_registry.cairo` — public campaign metadata and payout entitlement. The currently deployed version does **not** bind funding, enforce the deadline, or implement refunds.
 2. `payout_helper.cairo` — `privacy_invoke` entrypoint:
-   - `FUND`: organizer shields through the helper — helper verifies caller is the pool, records campaign funding commitment, returns the open note to the organizer.
+    - `FUND`: current prototype records a campaign funding signal and returns the open note to the organizer. This is not escrow and must not be described as reserved prize liquidity.
    - `PAYOUT`: helper verifies payout entitlement, records a payout commitment (hash of campaign + winner + amount; no plaintext recipient onchain), emits event, returns `OpenNoteDeposit { note_id, token, amount }` so the pool credits the winner's open note.
 
-All events public but carry only commitments — this satisfies "tx must carry an event from our contract" (CONTRIBUTING.md) since every transaction also touches the pool atomically.
+Events are public. They expose campaign IDs and amounts, so they do not provide amount or timing privacy; the helper only avoids publishing a plaintext recipient address.
 
 ## 5. Transaction plan (mainnet, all via strk20InvokeTransaction)
 
@@ -69,8 +69,8 @@ Requires the organizer's wallet with STRK on mainnet (real funds — user action
 ## 7. Status update (2026-08-17)
 
 - PHASE 1 done (this doc); PHASE 2 done: repo live at github.com/BlackAporia/game-shield, registration PR #86 opened — merge blocked by a pre-existing dead entry on the sprint repo (`Portablelle/veilance-market` returns 404), not by our entry (our entry validated as #64).
-- PHASE 3 done: `contracts/src/campaign_registry.cairo` + `payout_helper.cairo`, 10/10 snforge tests pass, pushed.
-- PHASE 4 done: Next.js app in `apps/web` (build passes): campaign create (registry call), fund (STRK20 `withdraw`+`OPEN`+invoke Fund), complete (winner commitment = poseidon(campaign_id, winner)), payout (STRK20 invoke Payout), on-chain verification of Funded/PayoutCommitted events.
+- PHASE 3 prototype: `contracts/src/campaign_registry.cairo` + `payout_helper.cairo`. Tests use a mock ERC-20 and impersonated pool calls; they are not a STRK20 integration test.
+- PHASE 4 prototype: Next.js app in `apps/web` (build passes): campaign create, helper Fund/Payout preparation, and event parsing. Ready X fee-review compatibility for ordinary registry invokes remains unverified and currently fails in the observed create-campaign flow.
 - Verified on mainnet via RPC: STRK = 0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d ("Starknet Token"), pool = 0x040337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a (deployed).
 
 ## 8. Next phases

@@ -1,5 +1,6 @@
-use starknet::{ContractAddress, get_caller_address};
+use starknet::ContractAddress;
 
+#[allow(starknet::store_no_default_variant)]
 #[derive(Copy, Drop, Serde, PartialEq, starknet::Store)]
 pub enum CampaignStatus {
     Active,
@@ -55,7 +56,7 @@ pub mod CampaignRegistry {
         StoragePointerWriteAccess,
     };
     use starknet::{ContractAddress, get_caller_address};
-    use super::{Campaign, CampaignStatus, ICampaignRegistry, errors};
+    use super::{Campaign, CampaignStatus, errors};
 
     #[storage]
     struct Storage {

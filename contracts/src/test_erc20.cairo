@@ -55,7 +55,8 @@ pub mod TestErc20 {
         fn mint(ref self: ContractState, account: ContractAddress, amount: u256) {
             self.balances.write(account, self.balances.read(account) + amount);
             self.total_supply.write(self.total_supply.read() + amount);
-            self.emit(Event::Transfer(Transfer { from: starknet::contract_address_const::<0>(), to: account, value: amount }));
+            let zero_address: ContractAddress = 0.try_into().unwrap();
+            self.emit(Event::Transfer(Transfer { from: zero_address, to: account, value: amount }));
         }
 
         fn balance_of(self: @ContractState, account: ContractAddress) -> u256 {

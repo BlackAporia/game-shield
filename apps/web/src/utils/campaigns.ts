@@ -78,12 +78,12 @@ export type HelperEventInfo = {
   commitment?: string;
 };
 
-export function parseHelperEvents(receipt: any): HelperEventInfo[] {
+export function parseHelperEvents(receipt: any, helperAddress: string): HelperEventInfo[] {
   const events: any[] = receipt?.events ?? receipt?.value?.events ?? [];
   const out: HelperEventInfo[] = [];
   for (const e of events) {
     const from = num.toHex(e.from_address ?? "");
-    if (from !== num.toHex(HelperAddressFromEnv())) continue;
+    if (from !== num.toHex(helperAddress)) continue;
     const key = num.toHex(e.keys?.[0] ?? "");
     const selFunded = num.toHex(hash.getSelectorFromName("Funded"));
     const selPayout = num.toHex(hash.getSelectorFromName("PayoutCommitted"));
@@ -103,11 +103,6 @@ export function parseHelperEvents(receipt: any): HelperEventInfo[] {
     }
   }
   return out;
-}
-
-// Helper address for receipt filtering (env-driven, same default as constants).
-export function HelperAddressFromEnv(): string {
-  return process.env.NEXT_PUBLIC_HELPER_ADDRESS ?? "0x0";
 }
 
 // ABI reference for the helper (kept for type parity with the Cairo interface).

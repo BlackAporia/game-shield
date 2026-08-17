@@ -29,6 +29,7 @@ export default function SelectWallet({ variant = "ctaBig" }: { variant?: "nav" |
 
   const isConnected = useStoreWallet(state => state.isConnected);
   const setConnected = useStoreWallet(state => state.setConnected);
+  const resetWallet = useStoreWallet(state => state.resetWallet);
   const address = useStoreWallet(state => state.address);
 
   const setWalletApi = useStoreWallet(state => state.setWalletApiList);
@@ -52,27 +53,21 @@ export default function SelectWallet({ variant = "ctaBig" }: { variant?: "nav" |
     return () => unsub();
   }, []);
 
-  // Show every detected wallet except MetaMask (its Snap probing spams an unlock popup)
-  // and Braavos (excluded from this starter's picker).
+  // Show every native Starknet wallet except MetaMask. Wallet API and STRK20
+  // compatibility are verified by the action preflight instead of a name allowlist.
   const pickable = wallets.filter((w) => {
     const id = normalizeId(w.name);
-    return !id.includes("metamask") && !id.includes("braavos");
+    return !id.includes("metamask");
   });
 
   // Unchanged connection flow: takes the wallet-standard wallet and populates
   // the zustand store with a WalletAccountV6 + account/chain/permissions.
   async function handleSelectedWallet(selectedWallet: WalletWithStarknetFeatures) {
     setMyWallet(selectedWallet); // zustand
-    console.log("Trying to connect wallet=", selectedWallet);
-    const myWA = await WalletAccountV6.connect(myFrontendProviders[2], selectedWallet);
-    setMyWalletAccount(myWA);
-    console.log("WalletAccount created=", myWA);
     const result = await walletV6.requestAccounts(selectedWallet);
     if (typeof (result) == "string") {
-      console.log("This Wallet is not compatible.");
-      return;
+      throw new Error("This wallet is not compatible.");
     }
-    console.log("Current account addr =", result);
     if (Array.isArray(result)) {
       const addr = validateAndParseAddress(result[0]);
       setAddressAccount(addr); // zustand
@@ -81,9 +76,11 @@ export default function SelectWallet({ variant = "ctaBig" }: { variant?: "nav" |
     setConnected(isConnectedWallet); // zustand
     if (isConnectedWallet) {
       const chainId = (await walletV6.requestChainId(selectedWallet)) as string;
+      const providerIndex = chainId === SNconstants.StarknetChainId.SN_MAIN ? 0 : 2;
+      const myWA = await WalletAccountV6.connect(myFrontendProviders[providerIndex], selectedWallet);
+      setMyWalletAccount(myWA);
       setChain(chainId);
-      setCurrentFrontendProviderIndex(chainId === SNconstants.StarknetChainId.SN_MAIN ? 0 : 2);
-      console.log("change Provider index to :", myFrontendProviderIndex);
+      setCurrentFrontendProviderIndex(providerIndex);
     }
     setWalletApi(await walletV6.supportedSpecs(selectedWallet));
   }
@@ -108,7 +105,6 @@ export default function SelectWallet({ variant = "ctaBig" }: { variant?: "nav" |
       await handleSelectedWallet(w);
       setPickerOpen(false);
     } catch (err: any) {
-      console.log("Wallet connection failed.\n", err);
       setError(err?.message ?? "Wallet connection failed.");
     } finally {
       setConnecting(false);
@@ -167,7 +163,7 @@ export default function SelectWallet({ variant = "ctaBig" }: { variant?: "nav" |
       return (
         <button
           className={styles.addrPill}
-          onClick={() => setConnected(false)}
+          onClick={resetWallet}
           title="Disconnect"
         >
           <span className={styles.addrDot} />

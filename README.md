@@ -1,14 +1,20 @@
 # GameShield — Private Gaming Bounty Hub
 
-GameShield brings privacy to gaming bounties on Starknet. Players and organizers use the STRK20 privacy pool so that no one can link bounty rewards, payouts, or participation to a wallet — private by default, disclosed only when a campaign requires it.
+GameShield is a STRK20 prototype for private gaming reward flows on Starknet. It uses the STRK20 pool and an app-specific `privacy_invoke` helper so the dapp does not handle viewing keys, notes, proofs, or recipient private keys.
 
 ## Why STRK20
 
-Every bounty system leaks the same thing: who was paid, how much, and by whom. GameShield replaces the public ledger with the STRK20 shielded pool:
+Every bounty system leaks payment information. GameShield reduces recipient-linkage exposure by routing reward delivery through STRK20 shielded notes:
 
-- **Organizers** shield campaign prize pools into the pool as private notes.
-- **Winners** get paid through a `privacy_invoke` helper: the pool withdraws to our helper, we record the payout commitment, and the winner's reward lands as an open private note — no public leg between bounty and winner.
-- **Payouts are provable** — the pool verifies every proof; our helper emits only commitments, never plaintext recipients.
+- **Organizers** shield STRK into private notes held by their wallet.
+- **Winners** receive an open private note through a `privacy_invoke` helper after the organizer selects a winner.
+- **Payouts are verifiable** — the pool verifies proofs and the helper emits a commitment, not a plaintext recipient.
+
+### Privacy and current limitations
+
+- Deposits, withdrawals to the helper, helper events, campaign IDs, reward amounts, and timing are public. GameShield does **not** provide full unlinkability against amount/timing correlation.
+- The current `Fund` helper action records an on-chain funding signal but returns the private note to the organizer. It is **not escrow** and does not reserve a campaign prize. Do not treat a campaign as collateralized until the planned stateful escrow helper is deployed and independently tested.
+- Winners need a STRK20-compatible wallet with viewing-key registration and note-discovery support.
 
 ## Architecture
 
@@ -20,10 +26,10 @@ Every bounty system leaks the same thing: who was paid, how much, and by whom. G
 ### Onchain flow (one STRK20 transaction per action)
 
 ```
-shield/fund:  wallet.strk20InvokeTransaction([{deposit}])           → pool, our helper event
-payout:       wallet.strk20InvokeTransaction([{transfer:"OPEN"},
-              {invoke: helper, calldata:[campaign, winner, "${openNoteIds[0]}"]}])
-              → pool withdraws → helper verifies → returns OpenNoteDeposit → winner's note
+shield:       wallet.strk20InvokeTransaction([{ deposit }])
+payout:       wallet.strk20InvokeTransaction([{ transfer: "OPEN" },
+               { invoke: helper, calldata: [...] }])
+               -> pool withdraws -> helper validates -> winner open note
 ```
 
 The dapp never touches viewing keys — the wallet (Wallet API 0.10.3, e.g. Ready) manages notes, proofs, and submission via `starknet.js` `WalletAccountV6` (`strk20InvokeTransaction`).
@@ -33,13 +39,25 @@ The dapp never touches viewing keys — the wallet (Wallet API 0.10.3, e.g. Read
 - `strk20.json` — mainnet transactions, contracts, demo links (filled as they exist).
 - `docs/strk20-integration.md` — integration research, mainnet parameters, transaction plan.
 
+## Verify locally
+
+The contracts require Scarb `2.18.0` and Starknet Foundry `0.60.0`:
+
+```bash
+cd contracts
+scarb --version
+snforge test
+```
+
+Expected result: 10 tests passed. `scarb test` is not the project test command; use `snforge test` so the integration tests under `contracts/tests` are collected.
+
 ## Status
 
 - [x] PHASE 1 — discover (integration route chosen: Starknet Wallet API + anonymizer helper)
 - [x] PHASE 2 — GitHub repo + skeleton + registration PR (#86, blocked by a dead registry entry on the sprint repo — not ours)
-- [x] PHASE 3 — Cairo contracts (campaign registry + `privacy_invoke` payout helper), 10/10 snforge tests
-- [x] PHASE 4 — web app (Next.js on the STRK20 starter kit base, campaign flows via `strk20InvokeTransaction`) — **live: https://gameshield-dapp.vercel.app** (auto-deploy via Vercel git integration)
-- [ ] PHASE 5 — deployment + mainnet transactions (deployable from the app with the connected wallet)
+- [x] PHASE 3 — Cairo prototype (campaign registry + `privacy_invoke` helper); unit tests are mock-based
+- [x] PHASE 4 — web app (Next.js on the STRK20 starter kit base) — **live: https://gameshield-dapp.vercel.app**
+- [ ] PHASE 5 — production-compatible wallet validation, escrow-helper redesign, and three qualifying mainnet STRK20 transactions
 - [ ] PHASE 6 — demo video + submission
 
 ## License

@@ -31,6 +31,16 @@ function fmtStrk(amount: bigint): string {
   return frac ? `${whole}.${frac}` : `${whole}`;
 }
 
+function parseStrkAmount(value: string): bigint {
+  const match = value.trim().match(/^(\d+)(?:\.(\d{1,18}))?$/);
+  if (!match) throw new Error("Enter a valid STRK amount with up to 18 decimals.");
+  const whole = BigInt(match[1]);
+  const fraction = BigInt((match[2] ?? "").padEnd(18, "0") || "0");
+  const amount = whole * 10n ** 18n + fraction;
+  if (amount <= 0n) throw new Error("Enter an amount > 0 STRK.");
+  return amount;
+}
+
 function fmtDeadline(ts: bigint): string {
   const n = Number(ts);
   return new Date(n * 1000).toLocaleDateString(undefined, {
@@ -101,7 +111,7 @@ export default function Page() {
   const myFrontendProviderIndex = useFrontendProvider((s) => s.currentFrontendProviderIndex);
 
   const networkName = constants.Strk20Networks[myFrontendProviderIndex];
-  const isStrk20Network = networkName !== undefined;
+  const isMainnet = myFrontendProviderIndex === 0;
 
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(false);
@@ -210,7 +220,7 @@ export default function Page() {
   // ─── private STRK20 submit ────────────────────────────────────────────────
 
   const refreshShielded = useCallback(async () => {
-    if (!myWalletAccount) {
+    if (!myWalletAccount || !isMainnet) {
       setShielded("");
       return;
     }
@@ -221,7 +231,7 @@ export default function Page() {
     } catch {
       setShielded("0");
     }
-  }, [myWalletAccount]);
+  }, [myWalletAccount, isMainnet]);
 
   useEffect(() => {
     refreshShielded();
@@ -232,9 +242,15 @@ export default function Page() {
       setShieldResult(errorResult("Connect a wallet first."));
       return;
     }
-    const amount = parseFloat(shieldAmount);
-    if (!(amount > 0)) {
-      setShieldResult(errorResult("Enter an amount > 0 STRK."));
+    if (!isMainnet) {
+      setShieldResult(errorResult("STRK20 actions are available on Mainnet only."));
+      return;
+    }
+    let amount: bigint;
+    try {
+      amount = parseStrkAmount(shieldAmount);
+    } catch (e: any) {
+      setShieldResult(errorResult(e?.message ?? "Enter a valid STRK amount."));
       return;
     }
     setShielding(true);
@@ -242,12 +258,12 @@ export default function Page() {
     try {
       const actions: WALLET_API.STRK20_ACTION[] =
         mode === "deposit"
-          ? [{ type: "deposit", token: constants.addrSTRK, amount: num.toHex(BigInt(Math.round(amount * 1e18))) }]
+          ? [{ type: "deposit", token: constants.addrSTRK, amount: num.toHex(amount) }]
           : [
               {
                 type: "withdraw",
                 token: constants.addrSTRK,
-                amount: num.toHex(BigInt(Math.round(amount * 1e18))),
+                amount: num.toHex(amount),
                 recipient: connectedAddress,
               },
             ];
@@ -281,12 +297,23 @@ export default function Page() {
       setResult(id, errorResult("No WalletAccount available."));
       return undefined;
     }
+    if (!isMainnet) {
+      setResult(id, errorResult("STRK20 actions are available on Mainnet only."));
+      return undefined;
+    }
     let txH: string;
     try {
+      setResult(id, {
+        status: "pending",
+        title: "Checking private transaction…",
+        note: "The wallet is preparing and simulating the STRK20 proof before submission.",
+      });
+      await myWalletAccount.strk20PrepareInvoke(actions, true);
       const r = await myWalletAccount.strk20InvokeTransaction(actions);
       txH = r.transaction_hash;
     } catch (e: any) {
-      setResult(id, errorResult(e?.message ?? e?.toString?.() ?? String(e)));
+      const message = e?.message ?? e?.toString?.() ?? String(e);
+      setResult(id, errorResult(`STRK20 preflight or submission failed: ${message}`));
       return undefined;
     }
     setResult(id, {
@@ -298,7 +325,7 @@ export default function Page() {
       const txR = await provider.waitForTransaction(txH, { retries: 400, retryInterval: 3000 });
       const r = receiptToResult(txR, txH);
       // Attach privacy events of our helper for verification.
-      const evs = parseHelperEvents(txR);
+      const evs = parseHelperEvents(txR, helper);
       if (evs.length) {
         const desc = evs
           .map((ev) => `${ev.name} (campaign ${ev.campaignId}, ${fmtStrk(ev.amount)} STRK)`)
@@ -324,6 +351,10 @@ export default function Page() {
   ) {
     if (!myWalletAccount) {
       setResult(id, errorResult("No WalletAccount available."));
+      return;
+    }
+    if (!isMainnet) {
+      setResult(id, errorResult("GameShield contracts are deployed on Mainnet only."));
       return;
     }
     let txH: string;
@@ -394,10 +425,20 @@ export default function Page() {
     }
   };
 
-  const handleSaveManual = () => {
+  const handleSaveManual = async () => {
     try {
       const reg = validateAndParseAddress(manualRegistry);
       const hel = validateAndParseAddress(manualHelper);
+      const [registryClass, helperClass] = await Promise.all([
+        provider.getClassHashAt(reg),
+        provider.getClassHashAt(hel),
+      ]);
+      if (num.toBigInt(registryClass) !== num.toBigInt("0x0043f1247fc09a89c13d776d13e8b6c7814d93193b64c0615e10238392edf038")) {
+        throw new Error("Registry address is not the deployed CampaignRegistry contract.");
+      }
+      if (num.toBigInt(helperClass) !== num.toBigInt("0x0725c73fdb163124aace8e665cdd1c0e4d0678e36e360d75b490d08906d62df0")) {
+        throw new Error("Helper address is not the deployed PayoutHelper contract.");
+      }
       saveDeployed({ registry: reg, helper: hel });
       setDeployResult({
         status: "ok",
@@ -407,8 +448,8 @@ export default function Page() {
           { label: "Helper", value: hel },
         ],
       });
-    } catch {
-      setDeployResult(errorResult("Enter two valid Starknet addresses (0x…)."));
+    } catch (e: any) {
+      setDeployResult(errorResult(e?.message ?? "Enter two valid GameShield contract addresses."));
     }
   };
 
@@ -423,6 +464,41 @@ export default function Page() {
     });
   };
 
+  const handleLinkHelper = async () => {
+    if (!myWalletAccount) {
+      setDeployResult(errorResult("Connect a wallet first."));
+      return;
+    }
+    if (!isMainnet) {
+      setDeployResult(errorResult("Linking is available on Mainnet only."));
+      return;
+    }
+    if (!registry || !helper || registry === "0x0" || helper === "0x0") {
+      setDeployResult(errorResult("Save the Registry and Helper addresses first."));
+      return;
+    }
+    setDeployState("Linking helper to registry…");
+    try {
+      const link = await myWalletAccount.execute([
+        { contractAddress: registry, entrypoint: "set_helper", calldata: [helper] },
+      ] as any);
+      await provider.waitForTransaction(link.transaction_hash, { retries: 400, retryInterval: 3000 });
+      setDeployResult({
+        status: "ok",
+        title: "Helper linked",
+        rows: [
+          { label: "Registry", value: registry },
+          { label: "Helper", value: helper },
+        ],
+        note: "set_helper confirmed on-chain from your wallet.",
+      });
+    } catch (e: any) {
+      setDeployResult(errorResult(e?.message ?? e?.toString?.() ?? String(e)));
+    } finally {
+      setDeployState("");
+    }
+  };
+
   // RPC contract_class must contain only the four spec fields (no debug info).
   const cleanClass = (c: any) => {
     const { sierra_program, contract_class_version, entry_points_by_type, abi } = c;
@@ -432,6 +508,10 @@ export default function Page() {
   const handleDeploy = async () => {
     if (!myWalletAccount || !connectedAddress) {
       setDeployResult(errorResult("Connect a wallet first."));
+      return;
+    }
+    if (!isMainnet) {
+      setDeployResult(errorResult("Deployment is available on Mainnet only."));
       return;
     }
     const wait = (h: string) =>
@@ -525,13 +605,37 @@ export default function Page() {
 
   const handleCreate = async () => {
     setResultCreate(null);
-    const reward = BigInt(Math.round(parseFloat(rewardStrk) * 1e18));
-    if (reward <= 0n) {
-      setResultCreate(errorResult("Enter a reward > 0 STRK."));
+    if (!myWalletAccount) {
+      setResultCreate(errorResult("Connect a wallet first."));
       return;
     }
-    const deadline = BigInt(Math.floor(Date.now() / 1000) + parseInt(deadlineDays) * 86400);
-    const criteriaHash = num.toHex(criteria || "no-criteria");
+    if (!isMainnet) {
+      setResultCreate(errorResult("Campaigns are available on Mainnet only."));
+      return;
+    }
+    let reward: bigint;
+    let deadline: bigint;
+    let criteriaHash: string;
+    try {
+      reward = parseStrkAmount(rewardStrk);
+      const days = Number(deadlineDays);
+      if (!Number.isInteger(days) || days <= 0 || days > 365) {
+        setResultCreate(errorResult("Enter a deadline from 1 to 365 days."));
+        return;
+      }
+      deadline = BigInt(Math.floor(Date.now() / 1000) + days * 86400);
+      const bytes = new TextEncoder().encode(criteria || "");
+      if (bytes.length > 31) {
+        setResultCreate(errorResult("Criteria is too long (max 31 chars)."));
+        return;
+      }
+      criteriaHash = bytes.length
+        ? "0x" + Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("")
+        : "0x0";
+    } catch (e: any) {
+      setResultCreate(errorResult(e?.message ?? "Enter a valid reward and deadline."));
+      return;
+    }
     const calls = [
       {
         contractAddress: registry,
@@ -539,10 +643,6 @@ export default function Page() {
         calldata: [reward.toString(16), deadline.toString(16), criteriaHash],
       },
     ];
-    if (!myWalletAccount) {
-      setResultCreate(errorResult("Connect a wallet first."));
-      return;
-    }
     let txH: string;
     try {
       const r = await myWalletAccount.execute(calls as any);
@@ -757,8 +857,8 @@ export default function Page() {
           <span className={styles.heroAccent}>Bounty Hub</span>
         </h1>
         <p className={styles.heroSub}>
-          Shield prize pools and pay winners through the STRK20 pool — no one can link
-          a bounty, a reward, or a payout to a wallet.
+          Manage campaign metadata publicly and deliver rewards through STRK20 shielded notes.
+          Public amounts and timing can still be correlated.
         </p>
       </header>
 
@@ -803,6 +903,13 @@ export default function Page() {
             <button className={`${styles.btn} ${styles.btnSmall}`} onClick={handleResetManual}>
               Reset
             </button>
+            <button
+              className={`${styles.btn} ${styles.btnSmall}`}
+              onClick={handleLinkHelper}
+              disabled={!isConnected || deployState !== ""}
+            >
+              Link helper
+            </button>
             <button className={`${styles.btn} ${styles.btnSmall}`} onClick={handleCheckWalletApi}>
               Wallet API check
             </button>
@@ -815,7 +922,7 @@ export default function Page() {
           <h2 className={styles.sectionTitle}>Shielded STRK</h2>
           <div className={styles.hint}>
             Private balance in the pool: <b className={styles.mono}>{shielded} STRK</b> — shield
-            STRK before funding a campaign.
+            STRK before submitting a helper action.
           </div>
           <div className={styles.formRow}>
             <input
@@ -826,14 +933,14 @@ export default function Page() {
             />
             <button
               className={`${styles.btn} ${styles.btnSmall}`}
-              disabled={!isConnected || shielding}
+                disabled={!isConnected || !isMainnet || shielding}
               onClick={() => handleShield("deposit")}
             >
               {shielding ? "…" : "Shield"}
             </button>
             <button
               className={`${styles.btn} ${styles.btnSmall}`}
-              disabled={!isConnected || shielding}
+                disabled={!isConnected || !isMainnet || shielding}
               onClick={() => handleShield("withdraw")}
             >
               {shielding ? "…" : "Unshield"}
@@ -874,7 +981,7 @@ export default function Page() {
                   value={criteria}
                   onChange={(e) => setCriteria(e.target.value)}
                 />
-                <button className={styles.btnCta} onClick={handleCreate} disabled={!isConnected}>
+                <button className={styles.btnCta} onClick={handleCreate} disabled={!isConnected || !isMainnet}>
                   Create campaign
                 </button>
               </div>
@@ -931,7 +1038,7 @@ export default function Page() {
                           disabled={busy[c.id] !== undefined}
                           onClick={() => handleFund(c)}
                         >
-                          {busy[c.id] === "fund" ? "…" : "Fund (shield STRK)"}
+                          {busy[c.id] === "fund" ? "…" : "Record funding signal"}
                         </button>
                       )}
                       {isOrganizer && c.status === 0 && (

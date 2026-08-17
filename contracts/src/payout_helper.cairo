@@ -1,4 +1,4 @@
-use starknet::{ContractAddress, get_caller_address, get_contract_address};
+use starknet::ContractAddress;
 
 // Must match privacy::objects::OpenNoteDeposit (positional Serde).
 #[derive(Serde, Copy, Drop, PartialEq, Debug)]
