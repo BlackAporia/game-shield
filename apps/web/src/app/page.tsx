@@ -396,6 +396,12 @@ export default function Page() {
     });
   };
 
+  // RPC contract_class must contain only the four spec fields (no debug info).
+  const cleanClass = (c: any) => {
+    const { sierra_program, contract_class_version, entry_points_by_type, abi } = c;
+    return { sierra_program, contract_class_version, entry_points_by_type, abi };
+  };
+
   const handleDeploy = async () => {
     if (!myWalletAccount || !connectedAddress) {
       setDeployResult(errorResult("Connect a wallet first."));
@@ -433,7 +439,7 @@ export default function Page() {
 
       setDeployState("Declaring CampaignRegistry…");
       const d1 = await myWalletAccount.declare({
-        contract: CampaignRegistrySierra,
+        contract: cleanClass(CampaignRegistrySierra),
         casm: CampaignRegistryCasm,
       } as any);
       await wait(d1.transaction_hash);
@@ -451,7 +457,7 @@ export default function Page() {
 
       setDeployState("Declaring PayoutHelper…");
       const d2 = await myWalletAccount.declare({
-        contract: PayoutHelperSierra,
+        contract: cleanClass(PayoutHelperSierra),
         casm: PayoutHelperCasm,
       } as any);
       await wait(d2.transaction_hash);
