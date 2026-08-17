@@ -91,17 +91,23 @@ body {
   overflow-x: hidden;
 }
 
-/* Redesigned app is committed to a single light "aurora" theme. */
 html {
-  color-scheme: light;
+  color-scheme: dark;
+  scroll-behavior: smooth;
 }
 
 body {
-  color: #0b0a14;
-  background: #fbf7fd;
+  color: #f7f2ff;
+  background: #050712;
 }
 
 a {
   color: inherit;
   text-decoration: none;
+}
+
+:focus-visible {
+  outline: 2px solid #ffb000;
+  outline-offset: 3px;
+  border-radius: 8px;
 }

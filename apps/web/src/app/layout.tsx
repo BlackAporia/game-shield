@@ -24,7 +24,7 @@ const jetbrains = JetBrains_Mono({
 export const metadata: Metadata = {
   title: 'GameShield · Private Gaming Bounty Hub',
   description:
-    'Shield prize pools and pay winners through the STRK20 privacy pool — unlinkable gaming bounties on Starknet',
+    'Create public gaming campaigns and deliver rewards through STRK20 shielded notes on Starknet.',
 }
 
 export default function RootLayout({

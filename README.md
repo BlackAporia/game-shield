@@ -15,6 +15,7 @@ Every bounty system leaks payment information. GameShield reduces recipient-link
 - Deposits, withdrawals to the helper, helper events, campaign IDs, reward amounts, and timing are public. GameShield does **not** provide full unlinkability against amount/timing correlation.
 - The current `Fund` helper action records an on-chain funding signal but returns the private note to the organizer. It is **not escrow** and does not reserve a campaign prize. Do not treat a campaign as collateralized until the planned stateful escrow helper is deployed and independently tested.
 - Winners need a STRK20-compatible wallet with viewing-key registration and note-discovery support.
+- Campaign reward and exact deadline are stored on-chain. Title, places and detailed rules are local MVP metadata whose integrity commitment is stored in `criteria_hash`; they are not yet shared across browsers because the project has no metadata indexer.
 
 ## Architecture
 

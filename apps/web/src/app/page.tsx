@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { num, validateAndParseAddress, type WalletAccountV6 } from "starknet";
+import { hash, num, validateAndParseAddress, type WalletAccountV6 } from "starknet";
 import type { WALLET_API } from "@starknet-io/types-js";
 import styles from "./uni.module.css";
 import SelectWallet from "./components/client/WalletHandle/SelectWallet";
@@ -43,11 +43,21 @@ function parseStrkAmount(value: string): bigint {
 
 function fmtDeadline(ts: bigint): string {
   const n = Number(ts);
-  return new Date(n * 1000).toLocaleDateString(undefined, {
+  return new Date(n * 1000).toLocaleString(undefined, {
     year: "numeric",
     month: "short",
     day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZoneName: "short",
   });
+}
+
+function defaultDeadline(): string {
+  const date = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  date.setSeconds(0, 0);
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
 }
 
 function shortHex(h: string): string {
@@ -76,6 +86,17 @@ type ActionResult = {
   title: string;
   rows?: ResultRow[];
   note?: string;
+};
+
+type CampaignMetadata = {
+  version: 1;
+  title: string;
+  seats: number;
+  description: string;
+  deadline: string;
+  reward: string;
+  organizer: string;
+  commitment: string;
 };
 
 function receiptToResult(txR: any, txH: string): ActionResult {
@@ -118,9 +139,12 @@ export default function Page() {
   const [error, setError] = useState("");
 
   // create form
+  const [campaignTitle, setCampaignTitle] = useState("");
   const [rewardStrk, setRewardStrk] = useState("10");
-  const [deadlineDays, setDeadlineDays] = useState("7");
-  const [criteria, setCriteria] = useState("");
+  const [deadlineAt, setDeadlineAt] = useState(defaultDeadline);
+  const [seats, setSeats] = useState("32");
+  const [description, setDescription] = useState("");
+  const [campaignMetadata, setCampaignMetadata] = useState<Record<number, CampaignMetadata>>({});
   const [resultCreate, setResultCreate] = useState<ActionResult | null>(null);
 
   // per-campaign results
@@ -187,6 +211,29 @@ export default function Page() {
       return false;
     }
   })();
+
+  const metadataStorageKey = `gameshield.campaign-metadata.${registry}`;
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(metadataStorageKey);
+      setCampaignMetadata(raw ? JSON.parse(raw) : {});
+    } catch {
+      setCampaignMetadata({});
+    }
+  }, [metadataStorageKey]);
+
+  const saveCampaignMetadata = (campaignId: number, metadata: CampaignMetadata) => {
+    setCampaignMetadata((current) => {
+      const next = { ...current, [campaignId]: metadata };
+      try {
+        localStorage.setItem(metadataStorageKey, JSON.stringify(next));
+      } catch {
+        /* On-chain campaign creation must not fail because browser storage is unavailable. */
+      }
+      return next;
+    });
+  };
 
   const explorerTxUrl = (h: string) =>
     myFrontendProviderIndex === 0
@@ -605,7 +652,7 @@ export default function Page() {
 
   const handleCreate = async () => {
     setResultCreate(null);
-    if (!myWalletAccount) {
+    if (!myWalletAccount || !connectedAddress) {
       setResultCreate(errorResult("Connect a wallet first."));
       return;
     }
@@ -615,25 +662,44 @@ export default function Page() {
     }
     let reward: bigint;
     let deadline: bigint;
+    let seatCount: number;
     let criteriaHash: string;
+    let metadata: CampaignMetadata;
     try {
+      const title = campaignTitle.trim();
+      const details = description.trim();
+      if (title.length < 3 || title.length > 80) {
+        throw new Error("Campaign title must be 3–80 characters.");
+      }
+      if (details.length < 20 || details.length > 2000) {
+        throw new Error("Detailed description must be 20–2000 characters.");
+      }
       reward = parseStrkAmount(rewardStrk);
-      const days = Number(deadlineDays);
-      if (!Number.isInteger(days) || days <= 0 || days > 365) {
-        setResultCreate(errorResult("Enter a deadline from 1 to 365 days."));
-        return;
+      seatCount = Number(seats);
+      if (!Number.isInteger(seatCount) || seatCount < 1 || seatCount > 10000) {
+        throw new Error("Number of places must be from 1 to 10,000.");
       }
-      deadline = BigInt(Math.floor(Date.now() / 1000) + days * 86400);
-      const bytes = new TextEncoder().encode(criteria || "");
-      if (bytes.length > 31) {
-        setResultCreate(errorResult("Criteria is too long (max 31 chars)."));
-        return;
+      const deadlineDate = new Date(deadlineAt);
+      if (Number.isNaN(deadlineDate.getTime())) {
+        throw new Error("Choose a valid campaign end date and time.");
       }
-      criteriaHash = bytes.length
-        ? "0x" + Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("")
-        : "0x0";
+      if (deadlineDate.getTime() < Date.now() + 5 * 60_000) {
+        throw new Error("Campaign must end at least 5 minutes from now.");
+      }
+      deadline = BigInt(Math.floor(deadlineDate.getTime() / 1000));
+      const metadataPayload = {
+        version: 1 as const,
+        title,
+        seats: seatCount,
+        description: details,
+        deadline: deadline.toString(),
+        reward: reward.toString(),
+        organizer: validateAddr(connectedAddress),
+      };
+      criteriaHash = num.toHex(hash.starknetKeccak(JSON.stringify(metadataPayload)));
+      metadata = { ...metadataPayload, commitment: criteriaHash };
     } catch (e: any) {
-      setResultCreate(errorResult(e?.message ?? "Enter a valid reward and deadline."));
+      setResultCreate(errorResult(e?.message ?? "Enter valid campaign details."));
       return;
     }
     const calls = [
@@ -674,7 +740,22 @@ export default function Page() {
     });
     try {
       await provider.waitForTransaction(txH, { retries: 400, retryInterval: 3000 });
-      setResultCreate(receiptToResult(await provider.getTransactionReceipt(txH), txH));
+      const receipt: any = await provider.getTransactionReceipt(txH);
+      const events: any[] = receipt?.events ?? receipt?.value?.events ?? [];
+      const createdSelector = num.toHex(hash.getSelectorFromName("CampaignCreated"));
+      const created = events.find((event) =>
+        num.toHex(event.from_address ?? "0x0") === num.toHex(registry) &&
+        num.toHex(event.keys?.[0] ?? "0x0") === createdSelector
+      );
+      const campaignId = created?.keys?.[1]
+        ? Number(num.toBigInt(created.keys[1]))
+        : await getCampaignCount(provider, registry);
+      saveCampaignMetadata(campaignId, metadata);
+      const result = receiptToResult(receipt, txH);
+      result.note = `Campaign #${campaignId} created. Full details are stored locally and verified by on-chain commitment ${shortHex(criteriaHash)}.`;
+      setResultCreate(result);
+      setCampaignTitle("");
+      setDescription("");
       await refreshCampaigns();
     } catch (e: any) {
       setResultCreate(errorResult(e?.message ?? String(e)));
@@ -857,12 +938,22 @@ export default function Page() {
 
   return (
     <div className={styles.page}>
-      <nav className={styles.nav}>
-        <div className={styles.brand}>
-          <span className={styles.brandBadge}>GS</span>
-          <span className={styles.brandName}>GameShield</span>
+      <nav className={styles.topbar}>
+        <div className={styles.nav}>
+          <a className={styles.brand} href="https://starknet-gaming.com/" target="_blank" rel="noreferrer">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img className={styles.brandBadge} src="/brand/starknet-gaming.png" alt="Starknet Gaming" />
+            <span className={styles.brandCopy}>
+              <span className={styles.brandParent}>Starknet Gaming</span>
+              <span className={styles.brandName}>GameShield</span>
+            </span>
+          </a>
+          <div className={styles.navActions}>
+            <a className={styles.navLink} href="#how-it-works">How it works</a>
+            <a className={styles.navLink} href="#campaigns">Campaigns</a>
+            <SelectWallet variant="nav" />
+          </div>
         </div>
-        <SelectWallet variant="nav" />
       </nav>
 
       <header className={styles.hero}>
@@ -879,9 +970,27 @@ export default function Page() {
       </header>
 
       <main className={styles.main}>
+        <section className={styles.workflow} id="how-it-works">
+          <div className={styles.workflowHead}>
+            <span className={styles.eyebrow}>Campaign lifecycle</span>
+            <h2>How GameShield works</h2>
+            <p>Public campaign coordination with STRK20 shielded reward delivery. Each step below states exactly what is public and what remains wallet-managed.</p>
+          </div>
+          <div className={styles.workflowGrid}>
+            <article className={styles.workflowStep}><span>01</span><h3>Shield</h3><p>Move public STRK into your wallet-managed private balance. Deposits remain visible on-chain.</p></article>
+            <article className={styles.workflowStep}><span>02</span><h3>Create</h3><p>Publish reward, exact deadline and a commitment to the detailed campaign metadata.</p></article>
+            <article className={styles.workflowStep}><span>03</span><h3>Funding signal</h3><p>Record a STRK20 helper interaction. The current helper returns funds to the organizer and is not escrow.</p></article>
+            <article className={styles.workflowStep}><span>04</span><h3>Complete</h3><p>The organizer commits the selected winner address without publishing it as plaintext.</p></article>
+            <article className={styles.workflowStep}><span>05</span><h3>Private payout</h3><p>Deliver the reward as an open shielded note. Campaign, amount and timing remain observable.</p></article>
+            <article className={styles.workflowStep}><span>06</span><h3>Cancel</h3><p>Cancel an active campaign. The deployed contract records status but does not enforce automatic refunds.</p></article>
+          </div>
+        </section>
+
         {/* Deploy / configure contracts */}
-        <section className={styles.section}>
-          <h2 className={styles.sectionTitle}>Contracts</h2>
+        <details className={styles.advancedPanel}>
+          <summary>Developer setup · deployed contracts</summary>
+          <section className={styles.section}>
+          <h2 className={styles.sectionTitle}>Contract configuration</h2>
           <div className={styles.hint}>
             One-time setup on Mainnet (the STRK20 pool lives there). Deploy with your wallet
             or paste already-deployed addresses.
@@ -931,7 +1040,8 @@ export default function Page() {
             </button>
           </div>
           {deployResult ? <ResultCard r={deployResult} /> : null}
-        </section>
+          </section>
+        </details>
 
         {/* Shield / unshield */}
         <section className={styles.section}>
@@ -977,29 +1087,40 @@ export default function Page() {
           <>
             {/* Create */}
             <section className={styles.section}>
-              <h2 className={styles.sectionTitle}>Create a bounty campaign</h2>
-              <div className={styles.formRow}>
-                <input
-                  className={styles.input}
-                  placeholder="Reward (STRK)"
-                  value={rewardStrk}
-                  onChange={(e) => setRewardStrk(e.target.value)}
-                />
-                <input
-                  className={styles.input}
-                  placeholder="Deadline (days)"
-                  value={deadlineDays}
-                  onChange={(e) => setDeadlineDays(e.target.value)}
-                />
-                <input
-                  className={styles.input}
-                  placeholder="Criteria (optional, e.g. tournament rules)"
-                  value={criteria}
-                  onChange={(e) => setCriteria(e.target.value)}
-                />
-                <button className={styles.btnCta} onClick={handleCreate} disabled={!isConnected || !isMainnet}>
-                  Create campaign
-                </button>
+              <div className={styles.sectionHeading}>
+                <div>
+                  <span className={styles.kicker}>New campaign</span>
+                  <h2 className={styles.sectionTitle}>Create a gaming bounty</h2>
+                </div>
+                <p>Set the public reward and exact closing time. Title, places and description are committed on-chain and retained locally in this MVP.</p>
+              </div>
+              <div className={styles.campaignForm}>
+                <label className={`${styles.field} ${styles.fieldWide}`}>
+                  <span>Campaign title</span>
+                  <input className={styles.input} placeholder="Summer speedrun challenge" maxLength={80} value={campaignTitle} onChange={(e) => setCampaignTitle(e.target.value)} />
+                </label>
+                <label className={styles.field}>
+                  <span>Reward</span>
+                  <div className={styles.inputUnit}><input className={styles.input} inputMode="decimal" value={rewardStrk} onChange={(e) => setRewardStrk(e.target.value)} /><b>STRK</b></div>
+                </label>
+                <label className={styles.field}>
+                  <span>Ends at · your local time</span>
+                  <input className={styles.input} type="datetime-local" value={deadlineAt} onChange={(e) => setDeadlineAt(e.target.value)} />
+                </label>
+                <label className={styles.field}>
+                  <span>Number of places</span>
+                  <input className={styles.input} type="number" min="1" max="10000" step="1" value={seats} onChange={(e) => setSeats(e.target.value)} />
+                  <small>Informational in the currently deployed contract.</small>
+                </label>
+                <label className={`${styles.field} ${styles.fieldFull}`}>
+                  <span>Detailed description and rules</span>
+                  <textarea className={`${styles.input} ${styles.textarea}`} placeholder="Describe eligibility, game mode, scoring, deliverables, winner selection and reward conditions…" maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)} />
+                  <small>{description.length}/2000 · Stored locally; its integrity commitment is public on-chain.</small>
+                </label>
+                <div className={styles.formSubmit}>
+                  <span>Deadline is recorded on-chain but is not automatically enforced by the deployed registry.</span>
+                  <button className={styles.btnCta} onClick={handleCreate} disabled={!isConnected || !isMainnet}>Create campaign</button>
+                </div>
               </div>
               {!isConnected ? (
                 <div className={styles.hint}>Connect a wallet to create and manage campaigns.</div>
@@ -1008,7 +1129,7 @@ export default function Page() {
             </section>
 
             {/* List */}
-            <section className={styles.section}>
+            <section className={styles.section} id="campaigns">
               <h2 className={styles.sectionTitle}>
                 Campaigns
                 <button className={styles.refresh} onClick={refreshCampaigns} disabled={loading}>
@@ -1023,6 +1144,14 @@ export default function Page() {
                 const isOrganizer =
                   connectedAddress && validateAddr(connectedAddress) === c.organizer;
                 const r = results[c.id];
+                const metadata = campaignMetadata[c.id];
+                const metadataVerified = (() => {
+                  try {
+                    return Boolean(metadata && num.toBigInt(metadata.commitment) === num.toBigInt(c.criteriaHash));
+                  } catch {
+                    return false;
+                  }
+                })();
                 return (
                   <div key={c.id} className={styles.campaignCard}>
                     <div className={styles.campaignHead}>
@@ -1032,6 +1161,10 @@ export default function Page() {
                         {c.paid ? " · paid" : ""}
                       </span>
                       <span className={styles.campaignOrg}>by {shortHex(c.organizer)}</span>
+                    </div>
+                    <div className={styles.campaignIntro}>
+                      <h3>{metadataVerified ? metadata.title : `Campaign #${c.id}`}</h3>
+                      <p>{metadataVerified ? metadata.description : "Detailed metadata is not available in this browser. The on-chain campaign state remains authoritative."}</p>
                     </div>
                     <div className={styles.campaignBody}>
                       <div className={styles.campaignMeta}>
@@ -1043,8 +1176,12 @@ export default function Page() {
                         <b>{fmtDeadline(c.deadline)}</b>
                       </div>
                       <div className={styles.campaignMeta}>
-                        <span>Criteria</span>
-                        <b className={styles.mono}>{shortHex(c.criteriaHash)}</b>
+                        <span>Places</span>
+                        <b>{metadataVerified ? metadata.seats : "—"}</b>
+                      </div>
+                      <div className={styles.campaignMeta}>
+                        <span>Metadata</span>
+                        <b className={styles.mono}>{metadataVerified ? "verified" : shortHex(c.criteriaHash)}</b>
                       </div>
                     </div>
                     <div className={styles.campaignActions}>
