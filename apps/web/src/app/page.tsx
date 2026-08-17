@@ -367,6 +367,33 @@ export default function Page() {
     }
   };
 
+  const handleCheckWalletApi = async () => {
+    if (!myWalletAccount) {
+      setDeployResult(errorResult("Connect a wallet first."));
+      return;
+    }
+    try {
+      const api: any = await (myWalletAccount as any).supportedWalletApi?.();
+      const specs: any = await (myWalletAccount as any).supportedSpecs?.();
+      const methods = api?.methods ?? [];
+      const declareOk = methods.includes("wallet_addDeclareTransaction");
+      const deployOk = methods.includes("wallet_addDeployAccountTransaction");
+      setDeployResult({
+        status: "ok",
+        title: `Wallet API: declare ${declareOk ? "SUPPORTED" : "NOT SUPPORTED"}`,
+        rows: [
+          { label: "wallet_addDeclareTransaction", value: declareOk ? "yes" : "no" },
+          { label: "wallet_addInvokeTransaction", value: methods.includes("wallet_addInvokeTransaction") ? "yes" : "no" },
+          { label: "wallet_addDeployAccountTransaction", value: deployOk ? "yes" : "no" },
+          { label: "Specs", value: String(specs?.specs ?? JSON.stringify(specs ?? [])) },
+        ],
+        note: "If declare is NOT supported, the wallet cannot deploy contracts. Use Argent X extension or starkli instead, then paste the addresses.",
+      });
+    } catch (e: any) {
+      setDeployResult(errorResult(e?.message ?? String(e)));
+    }
+  };
+
   const handleSaveManual = () => {
     try {
       const reg = validateAndParseAddress(manualRegistry);
@@ -775,6 +802,9 @@ export default function Page() {
             </button>
             <button className={`${styles.btn} ${styles.btnSmall}`} onClick={handleResetManual}>
               Reset
+            </button>
+            <button className={`${styles.btn} ${styles.btnSmall}`} onClick={handleCheckWalletApi}>
+              Wallet API check
             </button>
           </div>
           {deployResult ? <ResultCard r={deployResult} /> : null}
