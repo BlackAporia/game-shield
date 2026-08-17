@@ -66,10 +66,14 @@ Requires the organizer's wallet with STRK on mainnet (real funds — user action
 - Registration needs: public GitHub repo (user creates it — SSH auth works, gh absent), Telegram username.
 - Skills installed at `.agents/skills/`: `strk20-privacy-integration` (starkience agent prompt skill) + `strk20-privacy`, `strk20-wallet-api`, `strk20-privacy-sdk`, `strk20-anonymizer-contracts` (welttowelt/strk20-skills).
 
-## 7. Next phases
+## 7. Status update (2026-08-17)
 
-2. Skeleton → GitHub repo → registration PR (fork + registry.json append)
-3. Cairo contracts + snforge tests
-4. Web app (fork starter kit; swap Alchemy for Lava RPC)
-5. Deploy (starkli) + mainnet transactions
+- PHASE 1 done (this doc); PHASE 2 done: repo live at github.com/BlackAporia/game-shield, registration PR #86 opened — merge blocked by a pre-existing dead entry on the sprint repo (`Portablelle/veilance-market` returns 404), not by our entry (our entry validated as #64).
+- PHASE 3 done: `contracts/src/campaign_registry.cairo` + `payout_helper.cairo`, 10/10 snforge tests pass, pushed.
+- PHASE 4 done: Next.js app in `apps/web` (build passes): campaign create (registry call), fund (STRK20 `withdraw`+`OPEN`+invoke Fund), complete (winner commitment = poseidon(campaign_id, winner)), payout (STRK20 invoke Payout), on-chain verification of Funded/PayoutCommitted events.
+- Verified on mainnet via RPC: STRK = 0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d ("Starknet Token"), pool = 0x040337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a (deployed).
+
+## 8. Next phases
+
+5. Deploy registry + helper (starkli or wallet) + 3 mainnet transactions — needs user's wallet with STRK
 6. strk20.json fill + demo video + submit
