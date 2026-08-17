@@ -38,8 +38,8 @@ The dapp never touches viewing keys — the wallet (Wallet API 0.10.3, e.g. Read
 - [x] PHASE 1 — discover (integration route chosen: Starknet Wallet API + anonymizer helper)
 - [x] PHASE 2 — GitHub repo + skeleton + registration PR (#86, blocked by a dead registry entry on the sprint repo — not ours)
 - [x] PHASE 3 — Cairo contracts (campaign registry + `privacy_invoke` payout helper), 10/10 snforge tests
-- [x] PHASE 4 — web app (Next.js on the STRK20 starter kit base, campaign flows via `strk20InvokeTransaction`)
-- [ ] PHASE 5 — deployment + mainnet transactions (needs a funded wallet)
+- [x] PHASE 4 — web app (Next.js on the STRK20 starter kit base, campaign flows via `strk20InvokeTransaction`) — **live: https://gameshield-dapp.vercel.app** (auto-deploy via Vercel git integration)
+- [ ] PHASE 5 — deployment + mainnet transactions (deployable from the app with the connected wallet)
 - [ ] PHASE 6 — demo video + submission
 
 ## License

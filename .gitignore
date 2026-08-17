@@ -6,3 +6,4 @@ target/
 cairo_project.toml
 __pycache__/
 .DS_Store
+.vercel
