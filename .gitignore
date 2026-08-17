@@ -1,0 +1,8 @@
+node_modules/
+.env
+.env.local
+.scarb/
+target/
+cairo_project.toml
+__pycache__/
+.DS_Store
