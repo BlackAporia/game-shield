@@ -385,6 +385,17 @@ export default function Page() {
     }
   };
 
+  const handleResetManual = () => {
+    saveDeployed({ registry: "0x0", helper: "0x0" });
+    setManualRegistry("");
+    setManualHelper("");
+    setDeployResult({
+      status: "ok",
+      title: "Addresses cleared",
+      note: "Now run Deploy contracts to create the real contracts with the connected wallet.",
+    });
+  };
+
   const handleDeploy = async () => {
     if (!myWalletAccount || !connectedAddress) {
       setDeployResult(errorResult("Connect a wallet first."));
@@ -753,6 +764,9 @@ export default function Page() {
             />
             <button className={`${styles.btn} ${styles.btnSmall}`} onClick={handleSaveManual}>
               Save
+            </button>
+            <button className={`${styles.btn} ${styles.btnSmall}`} onClick={handleResetManual}>
+              Reset
             </button>
           </div>
           {deployResult ? <ResultCard r={deployResult} /> : null}
