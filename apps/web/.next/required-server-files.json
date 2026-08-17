@@ -105,7 +105,7 @@
         "transform": "lodash/{{member}}"
       }
     },
-    "outputFileTracingRoot": "/home/oldmolfar/game-shield/apps/web",
+    "outputFileTracingRoot": "/home/oldmolfar/game-shield",
     "enablePrerenderSourceMaps": true,
     "cacheComponents": false,
     "cacheLife": {
@@ -320,15 +320,15 @@
     "htmlLimitedBots": "[\\w-]+-Google|Google-[\\w-]+|Chrome-Lighthouse|Slurp|DuckDuckBot|baiduspider|yandex|sogou|bitlybot|tumblr|vkShare|quora link preview|redditbot|ia_archiver|Bingbot|BingPreview|applebot|facebookexternalhit|facebookcatalog|Twitterbot|LinkedInBot|Slackbot|Discordbot|WhatsApp|SkypeUriPreview|Yeti|googleweblight",
     "bundlePagesRouterDependencies": false,
     "configFileName": "next.config.js",
-    "repoRoot": "/home/oldmolfar/game-shield/apps/web",
+    "repoRoot": "/home/oldmolfar/game-shield",
     "turbopack": {
-      "root": "/home/oldmolfar/game-shield/apps/web"
+      "root": "/home/oldmolfar/game-shield"
     },
     "distDirRoot": ".next",
     "supportsImmutableAssets": false
   },
   "appDir": "/home/oldmolfar/game-shield/apps/web",
-  "relativeAppDir": "",
+  "relativeAppDir": "apps/web",
   "files": [
     ".next/package.json",
     ".next/routes-manifest.json",

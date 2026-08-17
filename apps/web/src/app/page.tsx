@@ -117,6 +117,12 @@ export default function Page() {
   const [results, setResults] = useState<Record<number, ActionResult>>({});
   const [busy, setBusy] = useState<Record<number, string>>({});
 
+  // shielded balance
+  const [shielded, setShielded] = useState("");
+  const [shieldAmount, setShieldAmount] = useState("10");
+  const [shieldResult, setShieldResult] = useState<ActionResult | null>(null);
+  const [shielding, setShielding] = useState(false);
+
   // deployment
   type Deployed = { registry: string; helper: string };
   const [deployed, setDeployed] = useState<Deployed>(() => {
@@ -202,6 +208,69 @@ export default function Page() {
   }, [refreshCampaigns, myFrontendProviderIndex]);
 
   // ─── private STRK20 submit ────────────────────────────────────────────────
+
+  const refreshShielded = useCallback(async () => {
+    if (!myWalletAccount) {
+      setShielded("");
+      return;
+    }
+    try {
+      const bals = await myWalletAccount.strk20Balances([constants.addrSTRK]);
+      const b = bals?.[0]?.balance;
+      setShielded(b !== undefined && b !== null ? fmtStrk(num.toBigInt(b)) : "0");
+    } catch {
+      setShielded("0");
+    }
+  }, [myWalletAccount]);
+
+  useEffect(() => {
+    refreshShielded();
+  }, [refreshShielded, myFrontendProviderIndex]);
+
+  const handleShield = async (mode: "deposit" | "withdraw") => {
+    if (!myWalletAccount || !connectedAddress) {
+      setShieldResult(errorResult("Connect a wallet first."));
+      return;
+    }
+    const amount = parseFloat(shieldAmount);
+    if (!(amount > 0)) {
+      setShieldResult(errorResult("Enter an amount > 0 STRK."));
+      return;
+    }
+    setShielding(true);
+    setShieldResult(null);
+    try {
+      const actions: WALLET_API.STRK20_ACTION[] =
+        mode === "deposit"
+          ? [{ type: "deposit", token: constants.addrSTRK, amount: num.toHex(BigInt(Math.round(amount * 1e18))) }]
+          : [
+              {
+                type: "withdraw",
+                token: constants.addrSTRK,
+                amount: num.toHex(BigInt(Math.round(amount * 1e18))),
+                recipient: connectedAddress,
+              },
+            ];
+      const r = await myWalletAccount.strk20InvokeTransaction(actions);
+      setShieldResult({
+        status: "pending",
+        title: "Waiting for confirmation…",
+        rows: [
+          { label: mode === "deposit" ? "Shield" : "Unshield", value: `${shieldAmount} STRK` },
+          { label: "Transaction", value: shortHex(r.transaction_hash), hash: r.transaction_hash },
+        ],
+      });
+      await provider.waitForTransaction(r.transaction_hash, { retries: 400, retryInterval: 3000 });
+      setShieldResult(
+        receiptToResult(await provider.getTransactionReceipt(r.transaction_hash), r.transaction_hash)
+      );
+      await refreshShielded();
+    } catch (e: any) {
+      setShieldResult(errorResult(e?.message ?? e?.toString?.() ?? String(e)));
+    } finally {
+      setShielding(false);
+    }
+  };
 
   async function submitPrivate(
     actions: WALLET_API.STRK20_ACTION[],
@@ -657,6 +726,41 @@ export default function Page() {
             </button>
           </div>
           {deployResult ? <ResultCard r={deployResult} /> : null}
+        </section>
+
+        {/* Shield / unshield */}
+        <section className={styles.section}>
+          <h2 className={styles.sectionTitle}>Shielded STRK</h2>
+          <div className={styles.hint}>
+            Private balance in the pool: <b className={styles.mono}>{shielded} STRK</b> — shield
+            STRK before funding a campaign.
+          </div>
+          <div className={styles.formRow}>
+            <input
+              className={styles.input}
+              placeholder="Amount (STRK)"
+              value={shieldAmount}
+              onChange={(e) => setShieldAmount(e.target.value)}
+            />
+            <button
+              className={`${styles.btn} ${styles.btnSmall}`}
+              disabled={!isConnected || shielding}
+              onClick={() => handleShield("deposit")}
+            >
+              {shielding ? "…" : "Shield"}
+            </button>
+            <button
+              className={`${styles.btn} ${styles.btnSmall}`}
+              disabled={!isConnected || shielding}
+              onClick={() => handleShield("withdraw")}
+            >
+              {shielding ? "…" : "Unshield"}
+            </button>
+          </div>
+          {!isConnected ? (
+            <div className={styles.hint}>Connect a wallet to manage your shielded balance.</div>
+          ) : null}
+          {shieldResult ? <ResultCard r={shieldResult} /> : null}
         </section>
 
         {!hasContracts ? (
