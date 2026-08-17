@@ -433,7 +433,8 @@ export default function Page() {
 
       setDeployState("Declaring CampaignRegistry…");
       const d1 = await myWalletAccount.declare({
-        contract: { sierra: CampaignRegistrySierra, casm: CampaignRegistryCasm },
+        contract: CampaignRegistrySierra,
+        casm: CampaignRegistryCasm,
       } as any);
       await wait(d1.transaction_hash);
       const registryClassHash = d1.class_hash;
@@ -450,7 +451,8 @@ export default function Page() {
 
       setDeployState("Declaring PayoutHelper…");
       const d2 = await myWalletAccount.declare({
-        contract: { sierra: PayoutHelperSierra, casm: PayoutHelperCasm },
+        contract: PayoutHelperSierra,
+        casm: PayoutHelperCasm,
       } as any);
       await wait(d2.transaction_hash);
       const helperClassHash = d2.class_hash;
