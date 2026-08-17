@@ -675,6 +675,7 @@ export default function Page() {
       </nav>
 
       <header className={styles.hero}>
+        <span className={styles.eyebrow}>STRK20 Private Sprint 2026</span>
         <h1 className={styles.heroTitle}>
           Private Gaming
           <br />
