@@ -28,6 +28,7 @@ import CampaignRegistrySierra from "../contracts/CampaignRegistry.sierra.json";
 import CampaignRegistryCasm from "../contracts/CampaignRegistry.casm.json";
 import PayoutHelperSierra from "../contracts/PayoutHelper.sierra.json";
 import PayoutHelperCasm from "../contracts/PayoutHelper.casm.json";
+import { tokenIcon } from "./components/TokenIcons";
 
 // ─── formatting helpers ──────────────────────────────────────────────────────
 
@@ -1305,9 +1306,10 @@ export default function Page() {
           </div>
           <div className={styles.formRow}>
             <span className={styles.tokenPicker}>
-              <span className={styles.tokenBadge} aria-hidden="true">
-                {symbolFor(shieldToken).charAt(0)}
-              </span>
+              {(() => {
+                const Icon = tokenIcon(symbolFor(shieldToken));
+                return <Icon size={22} className={styles.tokenBadge} title={symbolFor(shieldToken)} />;
+              })()}
               <select
                 className={styles.input}
                 value={shieldToken}
@@ -1376,9 +1378,10 @@ export default function Page() {
                   <div className={styles.formRow}>
                     <input className={styles.input} inputMode="decimal" value={rewardStrk} onChange={(e) => setRewardStrk(e.target.value)} />
                     <span className={styles.tokenPicker}>
-                      <span className={styles.tokenBadge} aria-hidden="true">
-                        {symbolFor(campaignToken).charAt(0)}
-                      </span>
+                      {(() => {
+                        const Icon = tokenIcon(symbolFor(campaignToken));
+                        return <Icon size={22} className={styles.tokenBadge} title={symbolFor(campaignToken)} />;
+                      })()}
                       <select className={styles.input} value={campaignToken} onChange={(e) => setCampaignToken(e.target.value)}>
                         {REWARD_TOKENS.map((t) => (
                           <option key={t.address} value={t.address}>{t.symbol}</option>
