@@ -48,8 +48,10 @@ mod errors {
     pub const ZERO_REWARD: felt252 = 'ZERO_REWARD';
     pub const ZERO_DEADLINE: felt252 = 'ZERO_DEADLINE';
     pub const ZERO_TOKEN: felt252 = 'ZERO_TOKEN';
+    pub const ZERO_OWNER: felt252 = 'ZERO_OWNER';
     pub const NOT_FOUND: felt252 = 'NOT_FOUND';
     pub const NOT_ORGANIZER: felt252 = 'NOT_ORGANIZER';
+    pub const NOT_OWNER: felt252 = 'NOT_OWNER';
     pub const NOT_HELPER: felt252 = 'NOT_HELPER';
     pub const NOT_ACTIVE: felt252 = 'NOT_ACTIVE';
     pub const NOT_COMPLETED: felt252 = 'NOT_COMPLETED';
@@ -83,6 +85,7 @@ pub mod CampaignRegistry {
         CampaignCompleted: CampaignCompleted,
         CampaignCancelled: CampaignCancelled,
         PayoutMarked: PayoutMarked,
+        HelperChanged: HelperChanged,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -107,16 +110,27 @@ pub mod CampaignRegistry {
     struct CampaignCancelled {
         #[key]
         campaign_id: u64,
+        organizer: ContractAddress,
     }
 
     #[derive(Drop, starknet::Event)]
     struct PayoutMarked {
         #[key]
         campaign_id: u64,
+        winner_commitment: felt252,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct HelperChanged {
+        #[key]
+        old_helper: ContractAddress,
+        #[key]
+        new_helper: ContractAddress,
     }
 
     #[constructor]
     fn constructor(ref self: ContractState, owner: ContractAddress) {
+        assert(owner.is_non_zero(), errors::ZERO_OWNER);
         self.owner.write(owner);
     }
 
@@ -189,12 +203,23 @@ pub mod CampaignRegistry {
 
             campaign.status = CampaignStatus::Cancelled;
             self.campaigns.write(campaign_id, campaign);
-            self.emit(Event::CampaignCancelled(CampaignCancelled { campaign_id }));
+            self.emit(
+                Event::CampaignCancelled(
+                    CampaignCancelled { campaign_id, organizer: campaign.organizer },
+                ),
+            );
         }
 
         fn set_helper(ref self: ContractState, helper: ContractAddress) {
-            assert(get_caller_address() == self.owner.read(), errors::NOT_ORGANIZER);
+            assert(get_caller_address() == self.owner.read(), errors::NOT_OWNER);
+            let old_helper = self.helper.read();
             self.helper.write(helper);
+            self
+                .emit(
+                    Event::HelperChanged(
+                        HelperChanged { old_helper, new_helper: helper },
+                    ),
+                );
         }
 
         fn get_campaign(self: @ContractState, campaign_id: u64) -> Campaign {
@@ -229,7 +254,14 @@ pub mod CampaignRegistry {
 
             campaign.paid = true;
             self.campaigns.write(campaign_id, campaign);
-            self.emit(Event::PayoutMarked(PayoutMarked { campaign_id }));
+            self
+                .emit(
+                    Event::PayoutMarked(
+                        PayoutMarked {
+                            campaign_id, winner_commitment: campaign.winner_commitment,
+                        },
+                    ),
+                );
         }
     }
 }

@@ -26,8 +26,10 @@ export interface WalletState {
     setSelectWalletUI: (displaySelectWalletUI: boolean) => void,
     walletApiList: string[],
     setWalletApiList: (version: string[]) => void,
-    selectedApiVersion: string,
+selectedApiVersion: string,
     setSelectedApiVersion: (version: string) => void,
+    strk20Supported: boolean,
+    setStrk20Supported: (supported: boolean) => void,
 
 }
 
@@ -37,13 +39,13 @@ export const useStoreWallet = create<WalletState>()(set => ({
     address: "",
     setAddressAccount: (address: string) => { set(state => ({ address })) },
     chain: "",
-    setChain: (chain: string) => { set(state => ({ chain: chain })) },
+    setChain: (chain: string) => { set(state => ({ chain })) },
     myWalletAccount: undefined,
     setMyWalletAccount: (myWAccount: WalletAccountV6) => { set(state => ({ myWalletAccount: myWAccount })) },
     account: undefined,
     setAccount: (account: AccountInterface) => { set(state => ({ account })) },
     provider: undefined,
-    setProvider: (provider: ProviderInterface) => { set(state => ({ provider: provider })) },
+    setProvider: (provider: ProviderInterface) => { set(state => ({ provider })) },
     isConnected: false,
     setConnected: (isConnected: boolean) => { set(state => ({ isConnected })) },
     resetWallet: () => {
@@ -56,6 +58,7 @@ export const useStoreWallet = create<WalletState>()(set => ({
             provider: undefined,
             isConnected: false,
             walletApiList: [],
+            strk20Supported: false,
         })
     },
     displaySelectWalletUI: false,
@@ -64,4 +67,6 @@ export const useStoreWallet = create<WalletState>()(set => ({
     setWalletApiList: (walletApi: string[]) => { set(state => ({ walletApiList: walletApi })) },
     selectedApiVersion: "default",
     setSelectedApiVersion: (selectedApiVersion: string) => { set(state => ({ selectedApiVersion })) },
+    strk20Supported: false,
+    setStrk20Supported: (supported: boolean) => { set(state => ({ strk20Supported: supported })) },
     }));

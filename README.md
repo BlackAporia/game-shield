@@ -32,6 +32,8 @@ Every bounty system leaks payment information. GameShield reduces recipient-link
 | `contracts/` | Cairo contracts: campaign registry (multi-token) + `privacy_invoke` payout helper |
 | `apps/web` | Next.js dapp: browse, create, fund, private payout, swap, bridge, rating |
 
+> **v2 flow note:** the v2 dapp uses direct STRK20 `deposit` / `transfer` actions on the privacy pool and bypasses the PayoutHelper contract in the live flow (the `paid` flag on the registry is therefore never set on-chain; the privacy-invoke path was hindered by Ready X not supporting the `OPEN` literal / invoke actions). The PayoutHelper contract is still deployed and remains in the repository for reference, but the live v2 flow does not call it.
+
 ### Onchain flow (one STRK20 transaction per action)
 
 ```
@@ -58,7 +60,7 @@ The 0.25% integrator fee is collected by the AVNU protocol on-chain into the Gam
 
 ## On-chain deployment (mainnet)
 
-The v2 (multi-token) registry and helper are deployed from the dapp's Developer settings (Deploy contracts). The dapp accepts both the v1 STRK-only and the v2 multi-token class hashes so earlier deployments keep working.
+Campaign registry and payout helper are deployed fresh per redeploy; the dapp accepts the most recently declared class hashes plus the v1/v2 historical hashes. Deploy from the dapp's Developer settings, or paste already-deployed addresses. The dapp's `Save addresses` flow verifies via ABI (`get_campaign_count` on the registry, `privacy_invoke` on the helper) and falls back to class-hash matching against the v1 STRK-only and v2 multi-token hashes when the ABI cannot be fetched.
 
 | Component | Address |
 | --- | --- |

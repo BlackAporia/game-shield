@@ -3,7 +3,7 @@ import styles from "../../../uni.module.css";
 import { useStoreWallet } from "../../Wallet/walletContext";
 import { useFrontendProvider } from "../provider/providerContext";
 import { useEffect, useState } from "react";
-import { walletV6, validateAndParseAddress, constants as SNconstants, WalletAccountV6 } from "starknet";
+import { walletV6, validateAndParseAddress, constants as SNconstants, compareVersions, WalletAccountV6 } from "starknet";
 import { WALLET_API } from "@starknet-io/types-js";
 import { myFrontendProviders } from "@/utils/constants";
 import { createStore, type Store } from "@starknet-io/get-starknet-discovery";
@@ -19,6 +19,16 @@ function normalizeId(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+// STRK20 Wallet API methods (strk20InvokeTransaction / strk20Balances / …)
+// were introduced in API version 0.10.3; any version >= 0.10.3 means the
+// wallet can perform shielded actions.
+const STRK20_MIN_VERSION = "0.10.3";
+
+function supportsStrk20(versions: string[] | undefined): boolean {
+  if (!Array.isArray(versions)) return false;
+  return versions.some((v) => compareVersions(v, STRK20_MIN_VERSION) >= 0);
+}
+
 export default function SelectWallet({ variant = "ctaBig" }: { variant?: "nav" | "ctaBig" }) {
 
   const setMyWallet = useStoreWallet(state => state.setMyStarknetWalletObject);
@@ -31,6 +41,8 @@ export default function SelectWallet({ variant = "ctaBig" }: { variant?: "nav" |
   const setConnected = useStoreWallet(state => state.setConnected);
   const resetWallet = useStoreWallet(state => state.resetWallet);
   const address = useStoreWallet(state => state.address);
+  const strk20Supported = useStoreWallet(state => state.strk20Supported);
+  const setStrk20Supported = useStoreWallet(state => state.setStrk20Supported);
 
   const setWalletApi = useStoreWallet(state => state.setWalletApiList);
 
@@ -76,13 +88,19 @@ export default function SelectWallet({ variant = "ctaBig" }: { variant?: "nav" |
     setConnected(isConnectedWallet); // zustand
     if (isConnectedWallet) {
       const chainId = (await walletV6.requestChainId(selectedWallet)) as string;
-      const providerIndex = chainId === SNconstants.StarknetChainId.SN_MAIN ? 0 : 2;
+      const providerIndex = chainId === SNconstants.StarknetChainId.SN_MAIN ? 0 : 1;
       const myWA = await WalletAccountV6.connect(myFrontendProviders[providerIndex], selectedWallet);
       setMyWalletAccount(myWA);
       setChain(chainId);
       setCurrentFrontendProviderIndex(providerIndex);
     }
     setWalletApi(await walletV6.supportedSpecs(selectedWallet));
+    try {
+      const apiVersions = await walletV6.supportedWalletApi(selectedWallet);
+      setStrk20Supported(supportsStrk20(apiVersions));
+    } catch {
+      setStrk20Supported(false);
+    }
   }
 
   // Open the wallet picker so the user can choose (Ready, Xverse, ...).
@@ -161,15 +179,25 @@ export default function SelectWallet({ variant = "ctaBig" }: { variant?: "nav" |
   if (variant === "nav") {
     if (isConnected && address) {
       return (
-        <button
-          className={styles.addrPill}
-          onClick={resetWallet}
-          title="Disconnect"
-        >
-          <span className={styles.addrDot} />
-          {shortAddr}
-          <span className={styles.addrDisconnect}>Disconnect</span>
-        </button>
+        <div className={styles.walletPanel}>
+          <button
+            className={styles.addrPill}
+            onClick={resetWallet}
+            title="Disconnect"
+          >
+            <span className={styles.addrDot} />
+            {shortAddr}
+            <span className={styles.addrDisconnect}>Disconnect</span>
+          </button>
+          {strk20Supported === false ? (
+            <span
+              className={styles.strk20Warn}
+              title="This wallet does not advertise STRK20 Wallet API methods. Fund and Payout are disabled; Create and Complete still work."
+            >
+              STRK20 not supported — Fund/Payout disabled
+            </span>
+          ) : null}
+        </div>
       );
     }
     return (

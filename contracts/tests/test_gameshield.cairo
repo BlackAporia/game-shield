@@ -1,7 +1,8 @@
 use snforge_std::{
     CheatSpan, cheat_caller_address, declare, DeclareResultTrait, ContractClassTrait,
+    start_cheat_block_timestamp, stop_cheat_block_timestamp,
 };
-use starknet::ContractAddress;
+use starknet::{ContractAddress, SyscallResultTrait};
 
 use gameshield::campaign_registry::{
     ICampaignRegistryDispatcher, ICampaignRegistryDispatcherTrait, CampaignStatus,
@@ -29,8 +30,12 @@ fn cheat_caller_for(target: ContractAddress, caller: felt252) {
 }
 
 fn deploy_registry() -> ContractAddress {
+    deploy_registry_with_owner(ORGANIZER)
+}
+
+fn deploy_registry_with_owner(owner: felt252) -> ContractAddress {
     let class = declare("CampaignRegistry").unwrap().contract_class();
-    let (address, _) = class.deploy(@array![addr(ORGANIZER).into()]).unwrap();
+    let (address, _) = class.deploy(@array![addr(owner).into()]).unwrap_syscall();
     address
 }
 
@@ -238,4 +243,137 @@ fn cannot_fund_cancelled_campaign() {
 
     mint(token, helper, 1000);
     let _ = invoke_as_pool(helper, Operation::Fund, id, token, 1000, 0, 0x1111);
+}
+
+#[test]
+#[should_panic(expected: ('NOT_OWNER',))]
+fn set_helper_only_owner() {
+    let registry = deploy_registry();
+
+    cheat_caller_for(registry, ALICE);
+    ICampaignRegistryDispatcher { contract_address: registry }
+        .set_helper(addr('any-helper'));
+}
+
+#[test]
+#[should_panic(expected: ('ZERO_OWNER',))]
+fn set_helper_zero_rejected() {
+    // Constructor must reject a zero owner before the contract is usable.
+    let _ = deploy_registry_with_owner(0);
+}
+
+#[test]
+#[should_panic(expected: ('NOT_ACTIVE',))]
+fn double_cancel_rejected() {
+    let registry = deploy_registry();
+    let id = create_campaign(registry, 1000, 100);
+
+    cheat_caller_for(registry, ORGANIZER);
+    ICampaignRegistryDispatcher { contract_address: registry }.cancel_campaign(id);
+
+    // Second cancel must fail because the campaign is no longer Active.
+    cheat_caller_for(registry, ORGANIZER);
+    ICampaignRegistryDispatcher { contract_address: registry }.cancel_campaign(id);
+}
+
+#[test]
+#[should_panic(expected: ('NOT_ACTIVE',))]
+fn double_complete_rejected() {
+    let registry = deploy_registry();
+    let id = create_campaign(registry, 1000, 100);
+
+    cheat_caller_for(registry, ORGANIZER);
+    ICampaignRegistryDispatcher { contract_address: registry }
+        .complete_campaign(id, 0x1234);
+
+    // Second complete must fail because the campaign is now Completed.
+    cheat_caller_for(registry, ORGANIZER);
+    ICampaignRegistryDispatcher { contract_address: registry }
+        .complete_campaign(id, 0x5678);
+}
+
+#[test]
+#[should_panic(expected: ('NOT_ACTIVE',))]
+fn complete_after_cancel_rejected() {
+    let registry = deploy_registry();
+    let id = create_campaign(registry, 1000, 100);
+
+    cheat_caller_for(registry, ORGANIZER);
+    ICampaignRegistryDispatcher { contract_address: registry }.cancel_campaign(id);
+
+    // Completing a cancelled campaign must fail.
+    cheat_caller_for(registry, ORGANIZER);
+    ICampaignRegistryDispatcher { contract_address: registry }
+        .complete_campaign(id, 0x1234);
+}
+
+// `fund_nonexistent_campaign` and `helper_rejects_unknown_campaign_id` are
+// skipped: snforge's in-process execution round-trips a default Campaign read
+// from an unwritten Map<u64, Campaign> key as "Unknown enum indicator: 0x0",
+// because the deserializer cannot match the zeroed-out CampaignStatus tag
+// against any of the declared variant names. The helper's CAMPAIGN_NOT_FOUND
+// branch is still reachable in production (any real privacy pool that mints
+// a note against an unknown campaign id will hit it), but it is not
+// reproducible inside the test framework.
+
+#[test]
+#[should_panic(expected: ('ZERO_POOL',))]
+fn helper_constructor_zero_pool_rejected() {
+    let registry = deploy_registry();
+    let class = declare("PayoutHelper").unwrap().contract_class();
+    // Panics inside the constructor with 'ZERO_POOL'.
+    let (_, _) = class.deploy(@array![addr(0).into(), registry.into()]).unwrap_syscall();
+}
+
+#[test]
+#[should_panic(expected: ('ZERO_REGISTRY',))]
+fn helper_constructor_zero_registry_rejected() {
+    let class = declare("PayoutHelper").unwrap().contract_class();
+    // Panics inside the constructor with 'ZERO_REGISTRY'.
+    let (_, _) = class.deploy(@array![addr(POOL).into(), addr(0).into()]).unwrap_syscall();
+}
+
+#[test]
+fn is_payout_valid_token_mismatch() {
+    let registry = deploy_registry();
+    let token_a = deploy_erc20();
+    let id = create_campaign_token(registry, 1000, 100, token_a);
+
+    cheat_caller_for(registry, ORGANIZER);
+    ICampaignRegistryDispatcher { contract_address: registry }
+        .complete_campaign(id, 0xabcd);
+
+    let dispatcher = ICampaignRegistryDispatcher { contract_address: registry };
+    // Same campaign, but caller supplies a different token address: must be invalid.
+    assert!(
+        !dispatcher.is_payout_valid(id, 0xabcd, 1000, addr('other-token')),
+        "wrong token must invalidate payout",
+    );
+    // Sanity: the original token still validates.
+    assert!(
+        dispatcher.is_payout_valid(id, 0xabcd, 1000, token_a),
+        "correct token still valid",
+    );
+}
+
+#[test]
+#[should_panic(expected: ('DEADLINE_PASSED',))]
+fn deadline_payout_rejected() {
+    let registry = deploy_registry();
+    let helper = deploy_helper(registry);
+    let token = deploy_erc20();
+
+    let id = create_campaign_token(registry, 1000, 100, token);
+    cheat_caller_for(registry, ORGANIZER);
+    ICampaignRegistryDispatcher { contract_address: registry }
+        .complete_campaign(id, 0x4242);
+
+    // Mint enough to satisfy the AMOUNT_MISMATCH guard, then fast-forward the
+    // helper's block timestamp past the campaign deadline (100).
+    mint(token, helper, 1000);
+    start_cheat_block_timestamp(helper, 200);
+
+    let _ = invoke_as_pool(helper, Operation::Payout, id, token, 1000, 0x4242, 0x1);
+
+    stop_cheat_block_timestamp(helper);
 }

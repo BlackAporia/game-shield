@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { hash, num, validateAndParseAddress, type WalletAccountV6 } from "starknet";
+import { hash, num, validateAndParseAddress, walletV6, compareVersions } from "starknet";
 import { getQuotes, executeSwap } from "@avnu/avnu-sdk";
 import type { WALLET_API } from "@starknet-io/types-js";
 import styles from "./uni.module.css";
@@ -43,16 +43,6 @@ function fmtStrk(amount: bigint): string {
   const whole = amount / 10n ** 18n;
   const frac = (amount % 10n ** 18n).toString().padStart(18, "0").replace(/0+$/, "");
   return frac ? `${whole}.${frac}` : `${whole}`;
-}
-
-function parseStrkAmount(value: string): bigint {
-  const match = value.trim().match(/^(\d+)(?:\.(\d{1,18}))?$/);
-  if (!match) throw new Error("Enter a valid STRK amount with up to 18 decimals.");
-  const whole = BigInt(match[1]);
-  const fraction = BigInt((match[2] ?? "").padEnd(18, "0") || "0");
-  const amount = whole * 10n ** 18n + fraction;
-  if (amount <= 0n) throw new Error("Enter an amount > 0 STRK.");
-  return amount;
 }
 
 function fmtDeadline(ts: bigint): string {
@@ -193,8 +183,10 @@ function RatingPanel({ ledger }: { ledger: ReturnType<typeof loadLedger> }) {
 
 export default function Page() {
   const myWalletAccount = useStoreWallet((s) => s.myWalletAccount);
+  const walletObj = useStoreWallet((s) => s.StarknetWalletObject);
   const connectedAddress = useStoreWallet((s) => s.address);
   const isConnected = useStoreWallet((s) => s.isConnected);
+  const strk20Supported = useStoreWallet((s) => s.strk20Supported);
   const myFrontendProviderIndex = useFrontendProvider((s) => s.currentFrontendProviderIndex);
 
   const networkName = constants.Strk20Networks[myFrontendProviderIndex];
@@ -213,6 +205,7 @@ export default function Page() {
   const [description, setDescription] = useState("");
   const [campaignMetadata, setCampaignMetadata] = useState<Record<number, CampaignMetadata>>({});
   const [resultCreate, setResultCreate] = useState<ActionResult | null>(null);
+  const [createBusy, setCreateBusy] = useState(false);
 
   // per-campaign results
   const [results, setResults] = useState<Record<number, ActionResult>>({});
@@ -382,8 +375,9 @@ export default function Page() {
   }, [myWalletAccount, isMainnet, shieldToken]);
 
   useEffect(() => {
+    if (!isMainnet) return;
     refreshShielded();
-  }, [refreshShielded, myFrontendProviderIndex, shieldToken]);
+  }, [refreshShielded, shieldToken]);
 
   useEffect(() => {
     setLedger(loadLedger());
@@ -558,34 +552,83 @@ export default function Page() {
       setDeployResult(errorResult("Connect a wallet first."));
       return;
     }
+    if (!walletObj) {
+      setDeployResult(errorResult("Wallet standard object unavailable — reconnect the wallet."));
+      return;
+    }
+    const STRK20_MIN = "0.10.3";
+    const safeProbe = async (fn: () => Promise<unknown>, label: string) => {
+      try {
+        return { label, ok: true, value: await fn() };
+      } catch (e: any) {
+        const msg = e?.message ?? e?.toString?.() ?? String(e);
+        return { label, ok: false, value: msg };
+      }
+    };
     try {
-      const api: any = await (myWalletAccount as any).supportedWalletApi?.();
-      const specs: any = await (myWalletAccount as any).supportedSpecs?.();
-      const methods: string[] = api?.methods ?? [];
-      const declareOk = methods.includes("wallet_addDeclareTransaction");
-      const deployOk = methods.includes("wallet_addDeployAccountTransaction");
-      const strk20Methods = methods.filter((m) => m.includes("strk20"));
-      const v6Methods = methods.filter((m) => m.includes("strk20") || m.includes("prepareInvoke"));
+      const apiProbe = await safeProbe(
+        () => walletV6.supportedWalletApi(walletObj),
+        "supportedWalletApi"
+      );
+      const specsProbe = await safeProbe(
+        () => walletV6.supportedSpecs(walletObj),
+        "supportedSpecs"
+      );
+      const apiVersions: string[] = Array.isArray(apiProbe.value)
+        ? (apiProbe.value as string[]).map(String)
+        : [];
+      const specs: string[] = Array.isArray(specsProbe.value)
+        ? (specsProbe.value as string[]).map(String)
+        : [];
+      const hasStrk20 = apiVersions.some((v) => {
+        try {
+          return compareVersions(v, STRK20_MIN) >= 0;
+        } catch {
+          return false;
+        }
+      });
+      const hasStarknetWalletApi = !!walletObj.features?.["starknet:walletApi"];
+      const walletApiVersion =
+        walletObj.features?.["starknet:walletApi"]?.version ?? "";
+      const rows: ResultRow[] = [
+        { label: "starknet:walletApi feature", value: hasStarknetWalletApi ? "yes" : "no" },
+        { label: "starknet:walletApi version", value: String(walletApiVersion || "—") },
+        {
+          label: "supportedWalletApi()",
+          value: apiProbe.ok
+            ? apiVersions.length
+              ? apiVersions.join(", ")
+              : "(empty)"
+            : `THREW: ${apiProbe.value}`,
+        },
+        {
+          label: "supportedSpecs()",
+          value: specsProbe.ok
+            ? specs.length
+              ? specs.join(", ")
+              : "(empty)"
+            : `THREW: ${specsProbe.value}`,
+        },
+        {
+          label: "STRK20 support (api >= 0.10.3)",
+          value: hasStrk20 ? "yes" : "no",
+        },
+        {
+          label: "STRK20 via probe",
+          value: hasStrk20
+            ? "Wallet advertises an API version >= 0.10.3 — private actions should work."
+            : "Wallet does NOT advertise an API version >= 0.10.3 — private actions (Fund/Payout) will be rejected.",
+        },
+      ];
       setDeployResult({
         status: "ok",
-        title: `Wallet API: declare ${declareOk ? "SUPPORTED" : "NOT SUPPORTED"}`,
-        rows: [
-          { label: "wallet_addDeclareTransaction", value: declareOk ? "yes" : "no" },
-          { label: "wallet_addInvokeTransaction", value: methods.includes("wallet_addInvokeTransaction") ? "yes" : "no" },
-          { label: "wallet_addDeployAccountTransaction", value: deployOk ? "yes" : "no" },
-          { label: "wallet_strk20InvokeTransaction", value: methods.includes("wallet_strk20InvokeTransaction") ? "yes" : "no" },
-          { label: "wallet_strk20PrepareInvoke", value: methods.includes("wallet_strk20PrepareInvoke") ? "yes" : "no" },
-          { label: "wallet_strk20Balances", value: methods.includes("wallet_strk20Balances") ? "yes" : "no" },
-          { label: "API versions", value: String(api?.versions ?? JSON.stringify(api ?? [])) },
-          { label: "Specs", value: String(specs?.specs ?? JSON.stringify(specs ?? [])) },
-          ...(strk20Methods.length
-            ? [{ label: "Other strk20 methods", value: strk20Methods.join(", ") }]
-            : []),
-        ],
-        note:
-          v6Methods.length
-            ? `STRK20 Wallet API methods advertised: ${v6Methods.join(", ")}.`
-            : "Wallet does NOT advertise any strk20 methods — private actions (Fund/Payout) cannot work through this wallet's Wallet API.",
+        title: hasStrk20
+          ? "Wallet API: STRK20 SUPPORTED"
+          : "Wallet API: STRK20 NOT SUPPORTED",
+        rows,
+        note: hasStrk20
+          ? `STRK20 Wallet API ready. Advertised versions: ${apiVersions.join(", ") || "(none)"}.`
+          : `Wallet advertises API versions: ${apiVersions.join(", ") || "(none)"}. ${STRK20_MIN} is required for STRK20 actions.`,
       });
     } catch (e: any) {
       setDeployResult(errorResult(e?.message ?? String(e)));
@@ -613,48 +656,70 @@ export default function Page() {
     setDeployResult({
       status: "pending",
       title: "Probing STRK20 action variants…",
-      note: "Approve each popup, or reject; the probe records the wallet's response either way.",
+      note: "Approve each popup, or reject; the probe records the wallet's response either way. Each variant is tried against STRK, USDC, and ETH in turn.",
     });
-    const rows = [];
-    const deposit1: WALLET_API.STRK20_ACTION[] = [
-      { type: "deposit", token: constants.addrSTRK, amount: num.toHex(1n) },
+    const rows: ResultRow[] = [];
+    // Three representative tokens: STRK (18 dec, the canonical), USDC (6 dec),
+    // ETH (18 dec, second-largest pool).
+    const probeTokens = [
+      REWARD_TOKENS.find((t) => t.symbol === "STRK") ?? REWARD_TOKENS[0],
+      REWARD_TOKENS.find((t) => t.symbol === "USDC") ?? REWARD_TOKENS[2],
+      REWARD_TOKENS.find((t) => t.symbol === "ETH") ?? REWARD_TOKENS[1],
     ];
-    const transferAmount: WALLET_API.STRK20_ACTION[] = [
-      { type: "transfer", token: constants.addrSTRK, amount: num.toHex(1n), recipient: connectedAddress },
-    ];
-    const withdraw1: WALLET_API.STRK20_ACTION[] = [
-      { type: "withdraw", token: constants.addrSTRK, amount: num.toHex(1n), recipient: connectedAddress },
-    ];
-    const transferOpen: WALLET_API.STRK20_ACTION[] = [
-      { type: "transfer", token: constants.addrSTRK, amount: "OPEN", recipient: connectedAddress },
-    ];
-    const noInvoke: WALLET_API.STRK20_ACTION[] = [
-      { type: "withdraw", token: constants.addrSTRK, amount: num.toHex(1n), recipient: helper },
-      { type: "transfer", token: constants.addrSTRK, amount: "OPEN", recipient: connectedAddress },
-    ];
-    const invokeOnly: WALLET_API.STRK20_ACTION[] = [
+    const variants: { build: (token: string) => WALLET_API.STRK20_ACTION[]; label: string }[] = [
       {
-        type: "invoke",
-        contract: helper,
-        calldata: ["0x0", num.toHex(1), num.toHex(constants.addrSTRK), num.toHex(1n), "0x0", "0x1"],
+        label: "deposit 1 wei",
+        build: (token) => [{ type: "deposit", token, amount: num.toHex(1n) }],
+      },
+      {
+        label: "transfer 1 wei (no OPEN)",
+        build: (token) => [
+          { type: "transfer", token, amount: num.toHex(1n), recipient: connectedAddress },
+        ],
+      },
+      {
+        label: "withdraw 1 wei to self",
+        build: (token) => [
+          { type: "withdraw", token, amount: num.toHex(1n), recipient: connectedAddress },
+        ],
+      },
+      {
+        label: "transfer OPEN",
+        build: (token) => [
+          { type: "transfer", token, amount: "OPEN", recipient: connectedAddress },
+        ],
+      },
+      {
+        label: "withdraw + transfer OPEN",
+        build: (token) => [
+          { type: "withdraw", token, amount: num.toHex(1n), recipient: helper },
+          { type: "transfer", token, amount: "OPEN", recipient: connectedAddress },
+        ],
+      },
+      {
+        label: "invoke helper (no OPEN)",
+        build: (token) => [
+          {
+            type: "invoke",
+            contract: helper,
+            calldata: ["0x0", num.toHex(1), token, num.toHex(1n), "0x0", "0x1"],
+          },
+        ],
       },
     ];
-    for (const [actions, label] of [
-      [deposit1, "deposit 1 wei"],
-      [transferAmount, "transfer 1 wei (no OPEN)"],
-      [withdraw1, "withdraw 1 wei to self"],
-      [transferOpen, "transfer OPEN"],
-      [noInvoke, "withdraw + transfer OPEN"],
-      [invokeOnly, "invoke helper (no OPEN)"],
-    ] as const) {
-      const r = await probeVariant(actions, label);
-      rows.push({ label: r.label, value: r.value });
+    for (const variant of variants) {
+      for (const token of probeTokens) {
+        const tokenLabel = token?.symbol ?? token?.address ?? "unknown";
+        const actions = variant.build(token.address);
+        const r = await probeVariant(actions, `${variant.label} · ${tokenLabel}`);
+        rows.push({ label: r.label, value: r.value, ok: r.ok });
+      }
     }
     setDeployResult({
       status: "ok",
       title: "Probe results",
       rows,
-      note: "If deposit/transfer-with-amount are accepted but OPEN variants are rejected, Ready X does not implement the OPEN literal yet. invoke-only tells us if invoke actions are supported at all.",
+      note: "Each variant is run against STRK, USDC, and ETH. If deposit/transfer-with-amount are accepted but OPEN variants are rejected, the wallet does not implement the OPEN literal yet. Per-token regressions (e.g. USDC fails where STRK succeeds) tell you which tokens the wallet's shielded state covers.",
     });
   };
 
@@ -662,25 +727,75 @@ export default function Page() {
     try {
       const reg = validateAndParseAddress(manualRegistry);
       const hel = validateAndParseAddress(manualHelper);
-      const [registryClass, helperClass] = await Promise.all([
-        provider.getClassHashAt(reg),
-        provider.getClassHashAt(hel),
+      const [registryClassObj, helperClassObj] = await Promise.all([
+        provider.getClass(reg),
+        provider.getClass(hel),
       ]);
-      // v1 (STRK-only) and v2 (multi-token) class hashes are both accepted so
-      // saved addresses from earlier deploys keep working.
-      const knownRegistry = [
-        "0x0043f1247fc09a89c13d776d13e8b6c7814d93193b64c0615e10238392edf038",
-        "0x02f99b411abfa12ffc433bdb4b557dda5905b8fda37f6aa357a4e4ad92c530fc",
-      ];
-      const knownHelper = [
-        "0x0725c73fdb163124aace8e665cdd1c0e4d0678e36e360d75b490d08906d62df0",
-        "0x07d04f0a23b8e149041a98c0a8359927e1f0d72cea06f764e5c41ff2ca306d13",
-      ];
-      if (!knownRegistry.some((h) => num.toBigInt(registryClass) === num.toBigInt(h))) {
-        throw new Error("Registry address is not a deployed CampaignRegistry contract.");
+      const abiHas = (abi: any, entrypoint: string): boolean => {
+        if (!Array.isArray(abi)) return false;
+        return abi.some(
+          (item: any) =>
+            item &&
+            typeof item === "object" &&
+            (item.name === entrypoint || (item.type === "function" && item.name === entrypoint))
+        );
+      };
+      const registryOk = abiHas(registryClassObj?.abi, "get_campaign_count");
+      const helperOk = abiHas(helperClassObj?.abi, "privacy_invoke");
+      // Fallback: if ABI could not be fetched, accept known v1/v2 class hashes plus
+      // the most recently deployed class hashes saved by handleDeploy.
+      let registryAccepted = registryOk;
+      let helperAccepted = helperOk;
+      if (!registryOk || !helperOk) {
+        const [registryClassHash, helperClassHash] = await Promise.all([
+          provider.getClassHashAt(reg),
+          provider.getClassHashAt(hel),
+        ]);
+        const knownRegistry = [
+          "0x0043f1247fc09a89c13d776d13e8b6c7814d93193b64c0615e10238392edf038",
+          "0x02f99b411abfa12ffc433bdb4b557dda5905b8fda37f6aa357a4e4ad92c530fc",
+          "0x03d66f6b5440217339cb6e70dc6c9f4796e9e9ec374903ce3c9a3db354ef6057",
+        ];
+        const knownHelper = [
+          "0x0725c73fdb163124aace8e665cdd1c0e4d0678e36e360d75b490d08906d62df0",
+          "0x07d04f0a23b8e149041a98c0a8359927e1f0d72cea06f764e5c41ff2ca306d13",
+          "0x0b05e4056756329c29a6259ee650ea5f7a6a61a8ddc3f6f7a9701b4edc7e63",
+        ];
+        let lastDeployed: any = {};
+        try {
+          const raw = localStorage.getItem("gameshield.lastDeployed");
+          if (raw) lastDeployed = JSON.parse(raw);
+        } catch {
+          /* ignore */
+        }
+        const acceptedRegistryHashes = [
+          ...knownRegistry,
+          ...(lastDeployed?.registryClassHash ? [String(lastDeployed.registryClassHash)] : []),
+        ];
+        const acceptedHelperHashes = [
+          ...knownHelper,
+          ...(lastDeployed?.helperClassHash ? [String(lastDeployed.helperClassHash)] : []),
+        ];
+        if (!registryAccepted) {
+          registryAccepted = acceptedRegistryHashes.some(
+            (h) => num.toBigInt(registryClassHash) === num.toBigInt(h)
+          );
+        }
+        if (!helperAccepted) {
+          helperAccepted = acceptedHelperHashes.some(
+            (h) => num.toBigInt(helperClassHash) === num.toBigInt(h)
+          );
+        }
       }
-      if (!knownHelper.some((h) => num.toBigInt(helperClass) === num.toBigInt(h))) {
-        throw new Error("Helper address is not a deployed PayoutHelper contract.");
+      if (!registryAccepted) {
+        throw new Error(
+          "Registry address is not a deployed CampaignRegistry contract (ABI missing get_campaign_count, and class hash does not match a known version)."
+        );
+      }
+      if (!helperAccepted) {
+        throw new Error(
+          "Helper address is not a deployed PayoutHelper contract (ABI missing privacy_invoke, and class hash does not match a known version)."
+        );
       }
       saveDeployed({ registry: reg, helper: hel });
       setDeployResult({
@@ -690,6 +805,9 @@ export default function Page() {
           { label: "Registry", value: reg },
           { label: "Helper", value: hel },
         ],
+        note: registryOk && helperOk
+          ? "Verified via ABI: the registry exposes get_campaign_count and the helper exposes privacy_invoke."
+          : "Saved via class-hash fallback (ABI could not be fetched on this RPC).",
       });
     } catch (e: any) {
       setDeployResult(errorResult(e?.message ?? "Enter two valid GameShield contract addresses."));
@@ -830,6 +948,20 @@ export default function Page() {
       await wait(link.transaction_hash);
 
       saveDeployed({ registry: registryAddress, helper: helperAddress });
+      try {
+        localStorage.setItem(
+          "gameshield.lastDeployed",
+          JSON.stringify({
+            registryClassHash: registryClassHash,
+            helperClassHash: helperClassHash,
+            registryAddress,
+            helperAddress,
+            ts: Date.now(),
+          })
+        );
+      } catch {
+        /* localStorage unavailable — best-effort persistence for handleSaveManual. */
+      }
       setDeployResult({
         status: "ok",
         title: "Contracts deployed and linked",
@@ -856,108 +988,113 @@ export default function Page() {
       setResultCreate(errorResult("Campaigns are available on Mainnet only."));
       return;
     }
-    let reward: bigint;
-    let deadline: bigint;
-    let seatCount: number;
-    let criteriaHash: string;
-    let metadata: CampaignMetadata;
+    setCreateBusy(true);
     try {
-      const title = campaignTitle.trim();
-      const details = description.trim();
-      if (title.length < 3 || title.length > 80) {
-        throw new Error("Campaign title must be 3–80 characters.");
+      let reward: bigint;
+      let deadline: bigint;
+      let seatCount: number;
+      let criteriaHash: string;
+      let metadata: CampaignMetadata;
+      try {
+        const title = campaignTitle.trim();
+        const details = description.trim();
+        if (title.length < 3 || title.length > 80) {
+          throw new Error("Campaign title must be 3–80 characters.");
+        }
+        if (details.length < 20 || details.length > 2000) {
+          throw new Error("Detailed description must be 20–2000 characters.");
+        }
+        reward = parseTokenAmount(rewardStrk, tokenByAddress(campaignToken).decimals);
+        seatCount = Number(seats);
+        if (!Number.isInteger(seatCount) || seatCount < 1 || seatCount > 10000) {
+          throw new Error("Number of places must be from 1 to 10,000.");
+        }
+        const deadlineDate = new Date(deadlineAt);
+        if (Number.isNaN(deadlineDate.getTime())) {
+          throw new Error("Choose a valid campaign end date and time.");
+        }
+        if (deadlineDate.getTime() < Date.now() + 5 * 60_000) {
+          throw new Error("Campaign must end at least 5 minutes from now.");
+        }
+        deadline = BigInt(Math.floor(deadlineDate.getTime() / 1000));
+        const tokenInfo = tokenByAddress(campaignToken);
+        const metadataPayload = {
+          version: 1 as const,
+          title,
+          seats: seatCount,
+          description: details,
+          deadline: deadline.toString(),
+          reward: reward.toString(),
+          token: tokenInfo.symbol,
+          organizer: validateAddr(connectedAddress),
+        };
+        criteriaHash = num.toHex(hash.starknetKeccak(JSON.stringify(metadataPayload)));
+        metadata = { ...metadataPayload, commitment: criteriaHash };
+      } catch (e: any) {
+        setResultCreate(errorResult(e?.message ?? "Enter valid campaign details."));
+        return;
       }
-      if (details.length < 20 || details.length > 2000) {
-        throw new Error("Detailed description must be 20–2000 characters.");
+      const calls = [
+        {
+          contractAddress: registry,
+          entrypoint: "create_campaign",
+          calldata: [num.toHex(reward), num.toHex(deadline), criteriaHash, campaignToken],
+        },
+      ];
+      setResultCreate({
+        status: "pending",
+        title: "Checking campaign contract…",
+        note: "Running a read-only Mainnet simulation before opening the wallet.",
+      });
+      try {
+        await provider.callContract(calls[0]);
+      } catch (e: any) {
+        setResultCreate(errorResult(`Campaign contract simulation failed: ${e?.message ?? String(e)}`));
+        return;
       }
-      reward = parseStrkAmount(rewardStrk);
-      seatCount = Number(seats);
-      if (!Number.isInteger(seatCount) || seatCount < 1 || seatCount > 10000) {
-        throw new Error("Number of places must be from 1 to 10,000.");
+      let txH: string;
+      try {
+        const r = await myWalletAccount.execute(calls as any);
+        txH = r.transaction_hash;
+      } catch (e: any) {
+        const message = e?.message ?? e?.toString?.() ?? String(e);
+        setResultCreate(errorResult(
+          `The campaign contract simulation succeeded, but the wallet did not submit the transaction. ` +
+          `Ready X fee review can fail for newly deployed custom contracts. Reload, reconnect on Mainnet, ` +
+          `and retry; if it repeats, use another compatible Starknet wallet. Wallet error: ${message}`
+        ));
+        return;
       }
-      const deadlineDate = new Date(deadlineAt);
-      if (Number.isNaN(deadlineDate.getTime())) {
-        throw new Error("Choose a valid campaign end date and time.");
+      setResultCreate({
+        status: "pending",
+        title: "Creating campaign…",
+        rows: [{ label: "Transaction", value: shortHex(txH), hash: txH }],
+      });
+      try {
+        await provider.waitForTransaction(txH, { retries: 400, retryInterval: 3000 });
+        const receipt: any = await provider.getTransactionReceipt(txH);
+        const events: any[] = receipt?.events ?? receipt?.value?.events ?? [];
+        const createdSelector = num.toHex(hash.getSelectorFromName("CampaignCreated"));
+        const created = events.find((event) =>
+          num.toHex(event.from_address ?? "0x0") === num.toHex(registry) &&
+          num.toHex(event.keys?.[0] ?? "0x0") === createdSelector
+        );
+        const campaignId = created?.keys?.[1]
+          ? Number(num.toBigInt(created.keys[1]))
+          : await getCampaignCount(provider, registry);
+        saveCampaignMetadata(campaignId, metadata);
+        const result = receiptToResult(receipt, txH);
+        result.note = `Campaign #${campaignId} created. Full details are stored locally and verified by on-chain commitment ${shortHex(criteriaHash)}.`;
+        setResultCreate(result);
+        setCampaignTitle("");
+        setDescription("");
+        await refreshCampaigns();
+        setLedger(recordPoints({ kind: "campaign", label: `Create campaign #${campaignId}`, points: POINTS_PER.campaign }));
+      } catch (e: any) {
+        setResultCreate(errorResult(e?.message ?? String(e)));
       }
-      if (deadlineDate.getTime() < Date.now() + 5 * 60_000) {
-        throw new Error("Campaign must end at least 5 minutes from now.");
-      }
-      deadline = BigInt(Math.floor(deadlineDate.getTime() / 1000));
-      const tokenInfo = tokenByAddress(campaignToken);
-      const metadataPayload = {
-        version: 1 as const,
-        title,
-        seats: seatCount,
-        description: details,
-        deadline: deadline.toString(),
-        reward: reward.toString(),
-        token: tokenInfo.symbol,
-        organizer: validateAddr(connectedAddress),
-      };
-      criteriaHash = num.toHex(hash.starknetKeccak(JSON.stringify(metadataPayload)));
-      metadata = { ...metadataPayload, commitment: criteriaHash };
-    } catch (e: any) {
-      setResultCreate(errorResult(e?.message ?? "Enter valid campaign details."));
-      return;
-    }
-    const calls = [
-      {
-        contractAddress: registry,
-        entrypoint: "create_campaign",
-        calldata: [num.toHex(reward), num.toHex(deadline), criteriaHash, campaignToken],
-      },
-    ];
-    setResultCreate({
-      status: "pending",
-      title: "Checking campaign contract…",
-      note: "Running a read-only Mainnet simulation before opening the wallet.",
-    });
-    try {
-      await provider.callContract(calls[0]);
-    } catch (e: any) {
-      setResultCreate(errorResult(`Campaign contract simulation failed: ${e?.message ?? String(e)}`));
-      return;
-    }
-    let txH: string;
-    try {
-      const r = await myWalletAccount.execute(calls as any);
-      txH = r.transaction_hash;
-    } catch (e: any) {
-      const message = e?.message ?? e?.toString?.() ?? String(e);
-      setResultCreate(errorResult(
-        `The campaign contract simulation succeeded, but the wallet did not submit the transaction. ` +
-        `Ready X fee review can fail for newly deployed custom contracts. Reload, reconnect on Mainnet, ` +
-        `and retry; if it repeats, use another compatible Starknet wallet. Wallet error: ${message}`
-      ));
-      return;
-    }
-    setResultCreate({
-      status: "pending",
-      title: "Creating campaign…",
-      rows: [{ label: "Transaction", value: shortHex(txH), hash: txH }],
-    });
-    try {
-      await provider.waitForTransaction(txH, { retries: 400, retryInterval: 3000 });
-      const receipt: any = await provider.getTransactionReceipt(txH);
-      const events: any[] = receipt?.events ?? receipt?.value?.events ?? [];
-      const createdSelector = num.toHex(hash.getSelectorFromName("CampaignCreated"));
-      const created = events.find((event) =>
-        num.toHex(event.from_address ?? "0x0") === num.toHex(registry) &&
-        num.toHex(event.keys?.[0] ?? "0x0") === createdSelector
-      );
-      const campaignId = created?.keys?.[1]
-        ? Number(num.toBigInt(created.keys[1]))
-        : await getCampaignCount(provider, registry);
-      saveCampaignMetadata(campaignId, metadata);
-      const result = receiptToResult(receipt, txH);
-      result.note = `Campaign #${campaignId} created. Full details are stored locally and verified by on-chain commitment ${shortHex(criteriaHash)}.`;
-      setResultCreate(result);
-      setCampaignTitle("");
-      setDescription("");
-      await refreshCampaigns();
-      setLedger(recordPoints({ kind: "campaign", label: `Create campaign #${campaignId}`, points: POINTS_PER.campaign }));
-    } catch (e: any) {
-      setResultCreate(errorResult(e?.message ?? String(e)));
+    } finally {
+      setCreateBusy(false);
     }
   };
 
@@ -1027,7 +1164,6 @@ export default function Page() {
         c.id,
         "Cancel campaign"
       );
-      await refreshCampaigns();
     } finally {
       setBusyFor(c.id);
     }
@@ -1218,8 +1354,9 @@ export default function Page() {
           {canPayout && (
             <button
               className={`${styles.btn} ${styles.btnGreen} ${styles.btnSmall}`}
-              disabled={busy[c.id] !== undefined}
+              disabled={busy[c.id] !== undefined || strk20Supported === false}
               onClick={() => submitWinner("payout")}
+              title={strk20Supported === false ? "Wallet does not support STRK20" : undefined}
             >
               {busy[c.id] === "payout" ? "…" : "Private payout"}
             </button>
@@ -1354,15 +1491,20 @@ export default function Page() {
             tokens before funding or paying out a campaign.
           </div>
           <div className={styles.formRow}>
-            <select
-              className={styles.input}
-              value={shieldToken}
-              onChange={(e) => setShieldToken(e.target.value)}
-            >
-              {REWARD_TOKENS.map((t) => (
-                <option key={t.address} value={t.address}>{t.symbol} — {t.name}</option>
-              ))}
-            </select>
+            <span className={styles.tokenPicker}>
+              <span className={styles.tokenBadge} aria-hidden="true">
+                {symbolFor(shieldToken).charAt(0)}
+              </span>
+              <select
+                className={styles.input}
+                value={shieldToken}
+                onChange={(e) => setShieldToken(e.target.value)}
+              >
+                {REWARD_TOKENS.map((t) => (
+                  <option key={t.address} value={t.address}>{t.symbol} — {t.name}</option>
+                ))}
+              </select>
+            </span>
             <input
               className={styles.input}
               placeholder={`Amount (${symbolFor(shieldToken)})`}
@@ -1371,14 +1513,14 @@ export default function Page() {
             />
             <button
               className={`${styles.btn} ${styles.btnSmall}`}
-                disabled={!isConnected || !isMainnet || shielding}
+                disabled={!isConnected || !isMainnet || shielding || strk20Supported === false}
               onClick={() => handleShield("deposit")}
             >
               {shielding ? "…" : "Shield"}
             </button>
             <button
               className={`${styles.btn} ${styles.btnSmall}`}
-                disabled={!isConnected || !isMainnet || shielding}
+                disabled={!isConnected || !isMainnet || shielding || strk20Supported === false}
               onClick={() => handleShield("withdraw")}
             >
               {shielding ? "…" : "Unshield"}
@@ -1386,6 +1528,11 @@ export default function Page() {
           </div>
           {!isConnected ? (
             <div className={styles.hint}>Connect a wallet to manage your shielded balance.</div>
+          ) : null}
+          {isConnected && strk20Supported === false ? (
+            <div className={styles.strk20WarnBlock}>
+              This wallet does not advertise STRK20 Wallet API support. Shield, Fund, and Payout are disabled — Connect a STRK20-capable wallet (Ready, Xverse) to use these features.
+            </div>
           ) : null}
           {shieldResult ? <ResultCard r={shieldResult} /> : null}
         </section>
@@ -1401,25 +1548,35 @@ export default function Page() {
             0.25% integrator fee that helps keep this sprint alive.</p>
           </div>
           <div className={styles.formRow}>
-            <select
-              className={styles.input}
-              value={swapFromToken}
-              onChange={(e) => setSwapFromToken(e.target.value)}
-            >
-              {REWARD_TOKENS.map((t) => (
-                <option key={t.address} value={t.address}>{t.symbol}</option>
-              ))}
-            </select>
+            <span className={styles.tokenPicker}>
+              <span className={styles.tokenBadge} aria-hidden="true">
+                {symbolFor(swapFromToken).charAt(0)}
+              </span>
+              <select
+                className={styles.input}
+                value={swapFromToken}
+                onChange={(e) => setSwapFromToken(e.target.value)}
+              >
+                {REWARD_TOKENS.map((t) => (
+                  <option key={t.address} value={t.address}>{t.symbol}</option>
+                ))}
+              </select>
+            </span>
             <span className={styles.hint}>→</span>
-            <select
-              className={styles.input}
-              value={swapToToken}
-              onChange={(e) => setSwapToToken(e.target.value)}
-            >
-              {REWARD_TOKENS.map((t) => (
-                <option key={t.address} value={t.address}>{t.symbol}</option>
-              ))}
-            </select>
+            <span className={styles.tokenPicker}>
+              <span className={styles.tokenBadge} aria-hidden="true">
+                {symbolFor(swapToToken).charAt(0)}
+              </span>
+              <select
+                className={styles.input}
+                value={swapToToken}
+                onChange={(e) => setSwapToToken(e.target.value)}
+              >
+                {REWARD_TOKENS.map((t) => (
+                  <option key={t.address} value={t.address}>{t.symbol}</option>
+                ))}
+              </select>
+            </span>
             <input
               className={styles.input}
               placeholder="Amount to sell"
@@ -1522,11 +1679,16 @@ export default function Page() {
                   <span>Reward</span>
                   <div className={styles.formRow}>
                     <input className={styles.input} inputMode="decimal" value={rewardStrk} onChange={(e) => setRewardStrk(e.target.value)} />
-                    <select className={styles.input} value={campaignToken} onChange={(e) => setCampaignToken(e.target.value)}>
-                      {REWARD_TOKENS.map((t) => (
-                        <option key={t.address} value={t.address}>{t.symbol}</option>
-                      ))}
-                    </select>
+                    <span className={styles.tokenPicker}>
+                      <span className={styles.tokenBadge} aria-hidden="true">
+                        {symbolFor(campaignToken).charAt(0)}
+                      </span>
+                      <select className={styles.input} value={campaignToken} onChange={(e) => setCampaignToken(e.target.value)}>
+                        {REWARD_TOKENS.map((t) => (
+                          <option key={t.address} value={t.address}>{t.symbol}</option>
+                        ))}
+                      </select>
+                    </span>
                   </div>
                 </label>
                 <label className={styles.field}>
@@ -1545,7 +1707,7 @@ export default function Page() {
                 </label>
                 <div className={styles.formSubmit}>
                   <span>Deadline is recorded on-chain but is not automatically enforced by the deployed registry.</span>
-                  <button className={styles.btnCta} onClick={handleCreate} disabled={!isConnected || !isMainnet}>Create campaign</button>
+                  <button className={styles.btnCta} onClick={handleCreate} disabled={!isConnected || !isMainnet || createBusy}>{createBusy ? "Creating…" : "Create campaign"}</button>
                 </div>
               </div>
               {!isConnected ? (
@@ -1628,8 +1790,9 @@ export default function Page() {
                       <div className={styles.campaignActions}>
                         <button
                           className={`${styles.btn} ${styles.btnSmall}`}
-                          disabled={busy[c.id] !== undefined}
+                          disabled={busy[c.id] !== undefined || strk20Supported === false}
                           onClick={() => handleFund(c)}
+                          title={strk20Supported === false ? "Wallet does not support STRK20" : undefined}
                         >
                           {busy[c.id] === "fund" ? "…" : "Fund reward"}
                         </button>

@@ -9,7 +9,7 @@ export const addrSTRK = "0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab0720185
 // STRK20 privacy pool (mainnet).
 export const PoolAddress = "0x040337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a";
 
-// Frontend RPC providers, indexed. Index 0 = Mainnet, index 2 = Sepolia.
+// Frontend RPC providers, indexed. Index 0 = Mainnet, index 1 = Sepolia.
 // NEXT_PUBLIC_RPC_MAINNET / NEXT_PUBLIC_RPC_SEPOLIA override the defaults
 // (free public endpoints; an Alchemy key works too).
 export const myFrontendProviders: ProviderInterface[] = [
@@ -18,7 +18,6 @@ export const myFrontendProviders: ProviderInterface[] = [
       process.env.NEXT_PUBLIC_RPC_MAINNET ??
       "https://rpc.starknet.lava.build",
   }),
-  new RpcProvider({ nodeUrl: "https://starknet-testnet.public.blastapi.io/rpc/v0_7" }),
   new RpcProvider({
     nodeUrl:
       process.env.NEXT_PUBLIC_RPC_SEPOLIA ??
@@ -38,7 +37,7 @@ export const HelperAddress =
   process.env.NEXT_PUBLIC_HELPER_ADDRESS ?? "0x0";
 
 // Frontend provider indices where the STRK20 privacy pool is available.
-export const Strk20Networks: Record<number, string> = { 0: "MAINNET", 2: "SEPOLIA" };
+export const Strk20Networks: Record<number, string> = { 0: "MAINNET", 1: "SEPOLIA" };
 
 // ─── GameShield Swap & Bridge ────────────────────────────────────────────────
 

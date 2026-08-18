@@ -1,6 +1,5 @@
 import { Abi, Contract, hash, num, ProviderInterface } from "starknet";
 import registryAbi from "../contracts/CampaignRegistry.json";
-import helperAbi from "../contracts/PayoutHelper.json";
 
 // On-chain status of a campaign, matching CampaignStatus in campaign_registry.cairo.
 export const CAMPAIGN_STATUS = ["Active", "Completed", "Cancelled"] as const;
@@ -20,10 +19,6 @@ export type Campaign = {
 
 export function registryContract(provider: ProviderInterface, address: string): Contract {
   return new Contract({ abi: registryAbi as Abi, address, providerOrAccount: provider });
-}
-
-export function helperContract(provider: ProviderInterface, address: string): Contract {
-  return new Contract({ abi: helperAbi as Abi, address, providerOrAccount: provider });
 }
 
 export function statusName(status: number): CampaignStatusName {
@@ -94,41 +89,3 @@ export async function getCampaign(
     paid: parseCairoBool(raw.paid),
   };
 }
-
-// Parse the Funded / PayoutCommitted events of the payout helper from a receipt.
-export type HelperEventInfo = {
-  name: "Funded" | "PayoutCommitted";
-  campaignId: number;
-  amount: bigint;
-  commitment?: string;
-};
-
-export function parseHelperEvents(receipt: any, helperAddress: string): HelperEventInfo[] {
-  const events: any[] = receipt?.events ?? receipt?.value?.events ?? [];
-  const out: HelperEventInfo[] = [];
-  for (const e of events) {
-    const from = num.toHex(e.from_address ?? "");
-    if (from !== num.toHex(helperAddress)) continue;
-    const key = num.toHex(e.keys?.[0] ?? "");
-    const selFunded = num.toHex(hash.getSelectorFromName("Funded"));
-    const selPayout = num.toHex(hash.getSelectorFromName("PayoutCommitted"));
-    if (key === selFunded) {
-      out.push({
-        name: "Funded",
-        campaignId: Number(num.toBigInt(e.keys?.[1])),
-        amount: num.toBigInt(e.data?.[0]),
-      });
-    } else if (key === selPayout) {
-      out.push({
-        name: "PayoutCommitted",
-        campaignId: Number(num.toBigInt(e.keys?.[1])),
-        amount: num.toBigInt(e.data?.[1]),
-        commitment: num.toHex(e.data?.[0]),
-      });
-    }
-  }
-  return out;
-}
-
-// ABI reference for the helper (kept for type parity with the Cairo interface).
-export { helperAbi };

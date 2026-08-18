@@ -42,10 +42,13 @@ mod errors {
     pub const CALLER_NOT_POOL: felt252 = 'CALLER_NOT_POOL';
     pub const ZERO_TOKEN: felt252 = 'ZERO_TOKEN';
     pub const ZERO_AMOUNT: felt252 = 'ZERO_AMOUNT';
+    pub const ZERO_POOL: felt252 = 'ZERO_POOL';
+    pub const ZERO_REGISTRY: felt252 = 'ZERO_REGISTRY';
     pub const AMOUNT_MISMATCH: felt252 = 'AMOUNT_MISMATCH';
     pub const CAMPAIGN_NOT_FOUND: felt252 = 'CAMPAIGN_NOT_FOUND';
     pub const CAMPAIGN_NOT_ACTIVE: felt252 = 'CAMPAIGN_NOT_ACTIVE';
     pub const PAYOUT_INVALID: felt252 = 'PAYOUT_INVALID';
+    pub const DEADLINE_PASSED: felt252 = 'DEADLINE_PASSED';
 }
 
 #[starknet::contract]
@@ -55,7 +58,7 @@ pub mod PayoutHelper {
         StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
         StoragePointerWriteAccess,
     };
-    use starknet::{ContractAddress, get_caller_address, get_contract_address};
+    use starknet::{ContractAddress, get_block_timestamp, get_caller_address, get_contract_address};
     use super::{
         IErc20Dispatcher, IErc20DispatcherTrait, OpenNoteDeposit, Operation, errors,
     };
@@ -82,6 +85,7 @@ pub mod PayoutHelper {
     struct Funded {
         #[key]
         campaign_id: u64,
+        token: ContractAddress,
         amount: u128,
     }
 
@@ -89,12 +93,15 @@ pub mod PayoutHelper {
     struct PayoutCommitted {
         #[key]
         campaign_id: u64,
-        winner_commitment: felt252,
+        token: ContractAddress,
         amount: u128,
+        winner_commitment: felt252,
     }
 
     #[constructor]
     fn constructor(ref self: ContractState, pool: ContractAddress, registry: ContractAddress) {
+        assert(pool.is_non_zero(), errors::ZERO_POOL);
+        assert(registry.is_non_zero(), errors::ZERO_REGISTRY);
         self.pool.write(pool);
         self.registry.write(registry);
     }
@@ -136,7 +143,7 @@ pub mod PayoutHelper {
 
                     // Pass the funds back to the organizer's open note — no custody.
                     erc20.approve(spender: pool, amount: amount.into());
-                    self.emit(Event::Funded(Funded { campaign_id, amount }));
+                    self.emit(Event::Funded(Funded { campaign_id, token, amount }));
                     array![OpenNoteDeposit { note_id, token, amount }].span()
                 },
                 Operation::Payout => {
@@ -145,6 +152,10 @@ pub mod PayoutHelper {
                     let registry = ICampaignRegistryDispatcher {
                         contract_address: self.registry.read()
                     };
+                    let campaign = registry.get_campaign(campaign_id);
+                    assert(
+                        get_block_timestamp() <= campaign.deadline, errors::DEADLINE_PASSED,
+                    );
                     assert(
                         registry.is_payout_valid(campaign_id, commitment, amount, token),
                         errors::PAYOUT_INVALID,
@@ -156,7 +167,12 @@ pub mod PayoutHelper {
                     self
                         .emit(
                             Event::PayoutCommitted(
-                                PayoutCommitted { campaign_id, winner_commitment: commitment, amount },
+                                PayoutCommitted {
+                                    campaign_id,
+                                    token,
+                                    amount,
+                                    winner_commitment: commitment,
+                                },
                             ),
                         );
                     array![OpenNoteDeposit { note_id, token, amount }].span()

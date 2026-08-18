@@ -288,6 +288,11 @@
         "name": "campaign_id",
         "type": "core::integer::u64",
         "kind": "key"
+      },
+      {
+        "name": "organizer",
+        "type": "core::starknet::contract_address::ContractAddress",
+        "kind": "data"
       }
     ]
   },
@@ -299,6 +304,28 @@
       {
         "name": "campaign_id",
         "type": "core::integer::u64",
+        "kind": "key"
+      },
+      {
+        "name": "winner_commitment",
+        "type": "core::felt252",
+        "kind": "data"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "gameshield::campaign_registry::CampaignRegistry::HelperChanged",
+    "kind": "struct",
+    "members": [
+      {
+        "name": "old_helper",
+        "type": "core::starknet::contract_address::ContractAddress",
+        "kind": "key"
+      },
+      {
+        "name": "new_helper",
+        "type": "core::starknet::contract_address::ContractAddress",
         "kind": "key"
       }
     ]
@@ -326,6 +353,11 @@
       {
         "name": "PayoutMarked",
         "type": "gameshield::campaign_registry::CampaignRegistry::PayoutMarked",
+        "kind": "nested"
+      },
+      {
+        "name": "HelperChanged",
+        "type": "gameshield::campaign_registry::CampaignRegistry::HelperChanged",
         "kind": "nested"
       }
     ]

@@ -140,6 +140,11 @@
         "kind": "key"
       },
       {
+        "name": "token",
+        "type": "core::starknet::contract_address::ContractAddress",
+        "kind": "data"
+      },
+      {
         "name": "amount",
         "type": "core::integer::u128",
         "kind": "data"
@@ -157,13 +162,18 @@
         "kind": "key"
       },
       {
-        "name": "winner_commitment",
-        "type": "core::felt252",
+        "name": "token",
+        "type": "core::starknet::contract_address::ContractAddress",
         "kind": "data"
       },
       {
         "name": "amount",
         "type": "core::integer::u128",
+        "kind": "data"
+      },
+      {
+        "name": "winner_commitment",
+        "type": "core::felt252",
         "kind": "data"
       }
     ]
