@@ -9,7 +9,6 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@avnu/avnu-sdk": "^4.2.0",
     "@starknet-io/get-starknet-discovery": "6.0.2",
     "@starknet-io/get-starknet-wallet-standard": "6.0.2",
     "next": "^16.0.8",

@@ -108,16 +108,7 @@ payout: [{ type: "transfer", token, amount, recipient }]        -> pool private 
   `0x7d04f0a23b8e149041a98c0a8359927e1f0d72cea06f764e5c41ff2ca306d13`. The dapp accepts
   both v1 and v2 hashes in Developer settings.
 - 10 supported reward tokens (STRK, ETH, USDC, USDT, DAI, WBTC, wstETH, xSTRK, LORDS,
-  EKUBO) with correct decimals, verified against the AVNU token list.
-- **Swap**: AVNU SDK (`@avnu/avnu-sdk` 4.2.0) — `getQuotes` with
-  `integratorFees: 25n` / `integratorFeeRecipient` / `integratorName: "GameShield"`, then
-  `executeSwap`. 0.25% integrator fee settles on-chain to the GameShield recipient.
-  AVNU also offers private swaps from shielded balances (`executePrivateSwap`) — planned
-  follow-up once a paymaster key is provisioned server-side.
-- **Bridge**: StarkGate (official, fee-free) / Layerswap (affiliate) / NEAR Intents /
-  Orbiter launchers with the wallet address pre-filled where supported.
-- **Rating**: local-first points ledger (volume + count + streaks) in `src/utils/points.ts`,
-  Bronze → Diamond levels rendered on the dapp.
+  EKUBO) with correct decimals.
 - **Qualifying transactions**: now any pool-touching tx qualifies (deposit / transfer /
   withdraw), since the rules require the tx to "touch the STRK20 pool". The reworked
   `verify-strk20-txs.mjs` scans receipts for pool events.

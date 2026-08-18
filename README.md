@@ -21,16 +21,14 @@ Every bounty system leaks payment information. GameShield reduces recipient-link
 
 - **Private rewards** — Fund = private `deposit` of the reward amount, Payout = private `transfer` of the reward amount to the winner. No `OPEN` literal, no invoke actions: these are the action variants every STRK20 wallet implements (verified by on-mainnet probes).
 - **Multi-token rewards** — the campaign registry stores the reward token on-chain; the dapp supports 10 major Starknet tokens with correct decimals.
-- **Swap (AVNU)** — best-price routing across Starknet liquidity via the AVNU SDK. GameShield earns a small 0.25% integrator fee (25 bps) on every swap, sent on-chain to the fee recipient.
-- **Bridge** — one-click launchers for StarkGate (official, fee-free), Layerswap, NEAR Intents and Orbiter, with the wallet address pre-filled where supported.
-- **Rating points** — local-first scoring: volume, swap count, campaigns, payouts and daily streaks map to Bronze → Diamond levels.
+- **Wallet compatibility** — Ready X and Xverse support the STRK20 Wallet API (deposit / transfer / withdraw). Braavos and MetaMask do not — they can create and complete campaigns but cannot perform private payouts; the dapp degrades gracefully.
 
 ## Architecture
 
 | Component | Role |
 | --- | --- |
 | `contracts/` | Cairo contracts: campaign registry (multi-token) + `privacy_invoke` payout helper |
-| `apps/web` | Next.js dapp: browse, create, fund, private payout, swap, bridge, rating |
+| `apps/web` | Next.js dapp: browse, create, fund, private payout |
 
 > **v2 flow note:** the v2 dapp uses direct STRK20 `deposit` / `transfer` actions on the privacy pool and bypasses the PayoutHelper contract in the live flow (the `paid` flag on the registry is therefore never set on-chain; the privacy-invoke path was hindered by Ready X not supporting the `OPEN` literal / invoke actions). The PayoutHelper contract is still deployed and remains in the repository for reference, but the live v2 flow does not call it.
 
@@ -42,16 +40,6 @@ payout:       wallet.strk20InvokeTransaction([{ transfer, token, amount, recipie
 ```
 
 The dapp never touches viewing keys — the wallet (Wallet API 0.10.3+, e.g. Ready, Xverse) manages notes, proofs, and submission via `starknet.js` `WalletAccountV6` (`strk20InvokeTransaction`).
-
-### Swap flow (AVNU)
-
-```
-getQuotes({ sellTokenAddress, buyTokenAddress, sellAmount, takerAddress,
-            integratorFees: 25, integratorFeeRecipient, integratorName: "GameShield" })
-executeSwap({ provider: wallet, quote, slippage })
-```
-
-The 0.25% integrator fee is collected by the AVNU protocol on-chain into the GameShield fee recipient on every executed swap.
 
 ## Sprint artifacts
 

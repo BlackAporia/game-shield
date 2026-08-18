@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { hash, num, validateAndParseAddress, walletV6, compareVersions } from "starknet";
-import { getQuotes, executeSwap } from "@avnu/avnu-sdk";
 import type { WALLET_API } from "@starknet-io/types-js";
 import styles from "./uni.module.css";
 import SelectWallet from "./components/client/WalletHandle/SelectWallet";
@@ -25,13 +24,6 @@ import {
   parseTokenAmount,
   symbolFor,
 } from "../utils/tokens";
-import {
-  loadLedger,
-  recordPoints,
-  computeStats,
-  swapPoints,
-  POINTS_PER,
-} from "../utils/points";
 import CampaignRegistrySierra from "../contracts/CampaignRegistry.sierra.json";
 import CampaignRegistryCasm from "../contracts/CampaignRegistry.casm.json";
 import PayoutHelperSierra from "../contracts/PayoutHelper.sierra.json";
@@ -130,57 +122,6 @@ function errorResult(msg: string): ActionResult {
   return { status: "error", title: "Action failed", note: msg };
 }
 
-function RatingPanel({ ledger }: { ledger: ReturnType<typeof loadLedger> }) {
-  const stats = computeStats(ledger);
-  const recent = ledger.slice(-5).reverse();
-  return (
-    <div className={styles.ratingGrid}>
-      <div className={styles.ratingCard}>
-        <span className={styles.ratingLabel}>Level</span>
-        <b className={styles.ratingBig}>{stats.level}</b>
-        {stats.nextLevel ? (
-          <span className={styles.ratingSmall}>
-            {stats.toNext} pts to {stats.nextLevel}
-          </span>
-        ) : (
-          <span className={styles.ratingSmall}>max level</span>
-        )}
-      </div>
-      <div className={styles.ratingCard}>
-        <span className={styles.ratingLabel}>Points</span>
-        <b className={styles.ratingBig}>{stats.total}</b>
-        <span className={styles.ratingSmall}>
-          {stats.base} base + {stats.streakBonus} streak
-        </span>
-      </div>
-      <div className={styles.ratingCard}>
-        <span className={styles.ratingLabel}>Swaps</span>
-        <b className={styles.ratingBig}>{stats.swaps}</b>
-        <span className={styles.ratingSmall}>
-          ${stats.volumeUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })} volume
-        </span>
-      </div>
-      <div className={styles.ratingCard}>
-        <span className={styles.ratingLabel}>Streak</span>
-        <b className={styles.ratingBig}>{stats.streak}d</b>
-        <span className={styles.ratingSmall}>{stats.activeDays} active days</span>
-      </div>
-      {recent.length ? (
-        <ul className={styles.ratingRecent}>
-          {recent.map((ev, i) => (
-            <li key={i}>
-              <span>{ev.label}</span>
-              <b>+{ev.points}</b>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <div className={styles.hint}>No activity yet — swap, fund or payout to earn points.</div>
-      )}
-    </div>
-  );
-}
-
 export default function Page() {
   const myWalletAccount = useStoreWallet((s) => s.myWalletAccount);
   const walletObj = useStoreWallet((s) => s.StarknetWalletObject);
@@ -217,20 +158,6 @@ export default function Page() {
   const [shieldToken, setShieldToken] = useState(REWARD_TOKENS[0].address);
   const [shieldResult, setShieldResult] = useState<ActionResult | null>(null);
   const [shielding, setShielding] = useState(false);
-
-  // swap (AVNU)
-  const [swapFromToken, setSwapFromToken] = useState(REWARD_TOKENS[1].address);
-  const [swapToToken, setSwapToToken] = useState(REWARD_TOKENS[2].address);
-  const [swapAmount, setSwapAmount] = useState("100");
-  const [swapSlippage, setSwapSlippage] = useState(0.005);
-  const [swapResult, setSwapResult] = useState<ActionResult | null>(null);
-  const [swapping, setSwapping] = useState(false);
-
-  // bridge
-  const [bridgeResult, setBridgeResult] = useState<ActionResult | null>(null);
-
-  // rating points
-  const [ledger, setLedger] = useState<ReturnType<typeof loadLedger>>([]);
 
   const [showDev, setShowDev] = useState(false);
 
@@ -379,10 +306,6 @@ export default function Page() {
     refreshShielded();
   }, [refreshShielded, shieldToken]);
 
-  useEffect(() => {
-    setLedger(loadLedger());
-  }, []);
-
   const handleShield = async (mode: "deposit" | "withdraw") => {
     if (!myWalletAccount || !connectedAddress) {
       setShieldResult(errorResult("Connect a wallet first."));
@@ -428,7 +351,6 @@ export default function Page() {
         receiptToResult(await provider.getTransactionReceipt(r.transaction_hash), r.transaction_hash)
       );
       await refreshShielded();
-      setLedger(recordPoints({ kind: "shield", label: `${mode} ${shieldAmount} ${tokenInfo.symbol}`, points: POINTS_PER.shield }));
     } catch (e: any) {
       setShieldResult(errorResult(e?.message ?? e?.toString?.() ?? String(e)));
     } finally {
@@ -1089,7 +1011,6 @@ export default function Page() {
         setCampaignTitle("");
         setDescription("");
         await refreshCampaigns();
-        setLedger(recordPoints({ kind: "campaign", label: `Create campaign #${campaignId}`, points: POINTS_PER.campaign }));
       } catch (e: any) {
         setResultCreate(errorResult(e?.message ?? String(e)));
       }
@@ -1109,7 +1030,6 @@ export default function Page() {
       ];
       await submitPrivate(actions, c.id, "Funding campaign", symbolFor(c.token));
       await refreshCampaigns();
-      setLedger(recordPoints({ kind: "fund", label: `Fund campaign #${c.id}`, points: POINTS_PER.fund }));
     } finally {
       setBusyFor(c.id);
     }
@@ -1150,7 +1070,6 @@ export default function Page() {
       ];
       await submitPrivate(actions, c.id, "Payout reward", symbolFor(c.token));
       await refreshCampaigns();
-      setLedger(recordPoints({ kind: "payout", label: `Payout campaign #${c.id}`, points: POINTS_PER.payout }));
     } finally {
       setBusyFor(c.id);
     }
@@ -1166,112 +1085,6 @@ export default function Page() {
       );
     } finally {
       setBusyFor(c.id);
-    }
-  };
-
-  // ─── swap (AVNU) ───────────────────────────────────────────────────────────
-
-  const handleSwap = async () => {
-    if (!myWalletAccount || !connectedAddress) {
-      setSwapResult(errorResult("Connect a wallet first."));
-      return;
-    }
-    if (!isMainnet) {
-      setSwapResult(errorResult("Swaps are available on Mainnet only."));
-      return;
-    }
-    const fromInfo = tokenByAddress(swapFromToken);
-    const toInfo = tokenByAddress(swapToToken);
-    let sellAmount: bigint;
-    try {
-      sellAmount = parseTokenAmount(swapAmount, fromInfo.decimals);
-    } catch (e: any) {
-      setSwapResult(errorResult(e?.message ?? "Enter a valid swap amount."));
-      return;
-    }
-    if (num.toHex(swapFromToken) === num.toHex(swapToToken)) {
-      setSwapResult(errorResult("Choose two different tokens."));
-      return;
-    }
-    setSwapping(true);
-    setSwapResult({
-      status: "pending",
-      title: "Finding the best route on AVNU…",
-      note: "Quotes are fetched with GameShield's 0.25% integrator fee included.",
-    });
-    try {
-      const [quote] = await getQuotes({
-        sellTokenAddress: swapFromToken,
-        buyTokenAddress: swapToToken,
-        sellAmount,
-        takerAddress: connectedAddress,
-        integratorFees: BigInt(constants.AVNU_FEE_BPS),
-        integratorFeeRecipient: constants.AVNU_FEE_RECIPIENT,
-        integratorName: constants.AVNU_INTEGRATOR_NAME,
-      });
-      if (!quote) {
-        setSwapResult(errorResult("No liquidity route found for this pair and amount."));
-        return;
-      }
-      setSwapResult({
-        status: "pending",
-        title: "Waiting for wallet confirmation…",
-        rows: [
-          { label: "Swap", value: `${swapAmount} ${fromInfo.symbol} → ${formatTokenAmount(num.toBigInt(quote.buyAmount), toInfo.decimals)} ${toInfo.symbol}` },
-          { label: "GameShield fee", value: `0.25% (${constants.AVNU_FEE_BPS} bps)` },
-          ...(quote.gasFeesInUsd !== undefined
-            ? [{ label: "Est. network fee", value: `$${Number(quote.gasFeesInUsd).toFixed(3)}` }]
-            : []),
-          { label: "Route", value: quote.routes.map((r) => `${r.percent}% ${r.name}`).join(" · ") },
-        ],
-        note: "Ready X can show a large network fee for contracts it has not verified (e.g. the AVNU router). That is Ready X's fee-review margin, not GameShield's fee. If it looks excessive, reject, retry once — the fee review usually settles to a normal value on retry.",
-      });
-      const result = await executeSwap({
-        provider: myWalletAccount,
-        quote,
-        slippage: swapSlippage,
-      });
-      const txH = result.transactionHash;
-      setSwapResult({
-        status: "pending",
-        title: "Waiting for confirmation…",
-        rows: [{ label: "Transaction", value: shortHex(txH), hash: txH }],
-      });
-      await provider.waitForTransaction(txH, { retries: 400, retryInterval: 3000 });
-      setSwapResult(receiptToResult(await provider.getTransactionReceipt(txH), txH));
-      const usd = Number(quote.buyAmountInUsd ?? quote.sellAmountInUsd ?? 0);
-      setLedger(
-        recordPoints({
-          kind: "swap",
-          label: `Swap ${swapAmount} ${fromInfo.symbol} → ${toInfo.symbol}`,
-          usd,
-          points: swapPoints(usd),
-        })
-      );
-    } catch (e: any) {
-      setSwapResult(errorResult(e?.message ?? e?.toString?.() ?? String(e)));
-    } finally {
-      setSwapping(false);
-    }
-  };
-
-  // ─── bridge ────────────────────────────────────────────────────────────────
-
-  const handleBridgeOpen = (url: string, name: string) => {
-    try {
-      const link =
-        name === "Layerswap"
-          ? `${url}?sourceNetwork=ethereum&destinationNetwork=starknet_mainnet&destination=${connectedAddress ?? ""}`
-          : url;
-      window.open(link, "_blank", "noopener,noreferrer");
-      setBridgeResult({
-        status: "ok",
-        title: `Opening ${name}`,
-        note: "Complete the transfer on the provider's site, then shield the received funds here.",
-      });
-      setLedger(recordPoints({ kind: "bridge", label: `Bridge via ${name}`, points: POINTS_PER.bridge }));
-    } catch (e: any) {
-      setBridgeResult(errorResult(e?.message ?? String(e)));
     }
   };
 
@@ -1535,123 +1348,6 @@ export default function Page() {
             </div>
           ) : null}
           {shieldResult ? <ResultCard r={shieldResult} /> : null}
-        </section>
-
-        {/* Swap (AVNU) */}
-        <section className={styles.section}>
-          <div className={styles.sectionHeading}>
-            <div>
-              <span className={styles.kicker}>Swap</span>
-              <h2 className={styles.sectionTitle}>Swap any token</h2>
-            </div>
-            <p>Best-price routing across all Starknet liquidity via AVNU. GameShield adds a small
-            0.25% integrator fee that helps keep this sprint alive.</p>
-          </div>
-          <div className={styles.formRow}>
-            <span className={styles.tokenPicker}>
-              <span className={styles.tokenBadge} aria-hidden="true">
-                {symbolFor(swapFromToken).charAt(0)}
-              </span>
-              <select
-                className={styles.input}
-                value={swapFromToken}
-                onChange={(e) => setSwapFromToken(e.target.value)}
-              >
-                {REWARD_TOKENS.map((t) => (
-                  <option key={t.address} value={t.address}>{t.symbol}</option>
-                ))}
-              </select>
-            </span>
-            <span className={styles.hint}>→</span>
-            <span className={styles.tokenPicker}>
-              <span className={styles.tokenBadge} aria-hidden="true">
-                {symbolFor(swapToToken).charAt(0)}
-              </span>
-              <select
-                className={styles.input}
-                value={swapToToken}
-                onChange={(e) => setSwapToToken(e.target.value)}
-              >
-                {REWARD_TOKENS.map((t) => (
-                  <option key={t.address} value={t.address}>{t.symbol}</option>
-                ))}
-              </select>
-            </span>
-            <input
-              className={styles.input}
-              placeholder="Amount to sell"
-              value={swapAmount}
-              onChange={(e) => setSwapAmount(e.target.value)}
-            />
-            <select
-              className={styles.input}
-              value={String(swapSlippage)}
-              onChange={(e) => setSwapSlippage(Number(e.target.value))}
-            >
-              <option value="0.005">0.5% slippage</option>
-              <option value="0.01">1% slippage</option>
-              <option value="0.03">3% slippage</option>
-            </select>
-            <button
-              className={`${styles.btn} ${styles.btnSmall}`}
-              disabled={!isConnected || !isMainnet || swapping}
-              onClick={handleSwap}
-            >
-              {swapping ? "…" : "Swap"}
-            </button>
-          </div>
-          <div className={styles.hint}>
-            <b className={styles.mono}>{constants.AVNU_FEE_BPS} bps</b> integrator fee goes to
-            GameShield on every swap. Topping up swap tokens is a bridge away — see below.
-          </div>
-          <div className={styles.hint}>
-            Ready X charges a fee-review margin on contracts it has not verified yet (like the
-            AVNU router). If the wallet shows an unusually large network fee, reject and retry
-            once — the fee review settles to a normal value on the second attempt.
-          </div>
-          {swapResult ? <ResultCard r={swapResult} /> : null}
-        </section>
-
-        {/* Bridge */}
-        <section className={styles.section}>
-          <div className={styles.sectionHeading}>
-            <div>
-              <span className={styles.kicker}>Bridge</span>
-              <h2 className={styles.sectionTitle}>Fund your wallet from anywhere</h2>
-            </div>
-            <p>Move funds onto Starknet with the most popular bridges. Pick a provider — the page
-            opens with your wallet address pre-filled where supported.</p>
-          </div>
-          <div className={styles.formRow}>
-            {constants.BRIDGE_PROVIDERS.map((p) => (
-              <button
-                key={p.id}
-                className={`${styles.btn} ${styles.btnSmall}`}
-                onClick={() => handleBridgeOpen(p.url, p.name)}
-                title={p.note}
-              >
-                {p.name}
-              </button>
-            ))}
-          </div>
-          <div className={styles.hint}>
-            {constants.BRIDGE_PROVIDERS.map((p) => `${p.name}: ${p.fee}`).join(" · ")} ·
-            StarkGate is the official bridge with no fees.
-          </div>
-          {bridgeResult ? <ResultCard r={bridgeResult} /> : null}
-        </section>
-
-        {/* Rating */}
-        <section className={styles.section}>
-          <div className={styles.sectionHeading}>
-            <div>
-              <span className={styles.kicker}>Rating</span>
-              <h2 className={styles.sectionTitle}>Your GameShield points</h2>
-            </div>
-            <p>Earn points for swaps (volume + count), campaigns, payouts and streaks. Higher
-            ratings unlock better visibility on the gaming bounty board.</p>
-          </div>
-          <RatingPanel ledger={ledger} />
         </section>
 
         {!hasContracts ? (
