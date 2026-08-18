@@ -509,6 +509,62 @@ export default function Page() {
     }
   };
 
+  // Probe: submit progressively larger action bundles to isolate which STRK20
+  // action Ready X rejects. Each variant is a real wallet request.
+  const probeVariant = async (actions: WALLET_API.STRK20_ACTION[], label: string) => {
+    try {
+      const r = await myWalletAccount!.strk20InvokeTransaction(actions);
+      return { label, ok: true, value: `accepted — tx ${shortHex(r.transaction_hash)}` };
+    } catch (e: any) {
+      const message = e?.message ?? e?.toString?.() ?? String(e);
+      const data = e?.data ?? e?.cause?.data;
+      return { label, ok: false, value: message + (data ? ` — data: ${JSON.stringify(data)}` : "") };
+    }
+  };
+
+  const handleProbeStrk20 = async () => {
+    if (!myWalletAccount) {
+      setDeployResult(errorResult("Connect a wallet first."));
+      return;
+    }
+    setDeployResult({
+      status: "pending",
+      title: "Probing STRK20 action variants…",
+      note: "Approve each popup, or reject; the probe records the wallet's response either way.",
+    });
+    const rows = [];
+    const transferOpen: WALLET_API.STRK20_ACTION[] = [
+      { type: "transfer", token: constants.addrSTRK, amount: "OPEN", recipient: connectedAddress },
+    ];
+    const noInvoke: WALLET_API.STRK20_ACTION[] = [
+      { type: "withdraw", token: constants.addrSTRK, amount: num.toHex(1n), recipient: helper },
+      { type: "transfer", token: constants.addrSTRK, amount: "OPEN", recipient: connectedAddress },
+    ];
+    const fullFund: WALLET_API.STRK20_ACTION[] = [
+      { type: "withdraw", token: constants.addrSTRK, amount: num.toHex(1n), recipient: helper },
+      { type: "transfer", token: constants.addrSTRK, amount: "OPEN", recipient: connectedAddress },
+      {
+        type: "invoke",
+        contract: helper,
+        calldata: ["0x0", num.toHex(1), num.toHex(constants.addrSTRK), num.toHex(1n), "0x0", "${openNoteIds[0]}"],
+      },
+    ];
+    for (const [actions, label] of [
+      [transferOpen, "transfer OPEN only"],
+      [noInvoke, "withdraw + transfer OPEN"],
+      [fullFund, "withdraw + transfer OPEN + invoke"],
+    ] as const) {
+      const r = await probeVariant(actions, label);
+      rows.push({ label: r.label, value: r.value });
+    }
+    setDeployResult({
+      status: "ok",
+      title: "Probe results",
+      rows,
+      note: "If variants 1–2 are accepted but 3 is rejected, Ready X does not support the invoke action.",
+    });
+  };
+
   const handleSaveManual = async () => {
     try {
       const reg = validateAndParseAddress(manualRegistry);
@@ -1074,6 +1130,13 @@ export default function Page() {
             </button>
             <button className={`${styles.btn} ${styles.btnSmall}`} onClick={handleCheckWalletApi}>
               Wallet API check
+            </button>
+            <button
+              className={`${styles.btn} ${styles.btnSmall}`}
+              onClick={handleProbeStrk20}
+              disabled={!isConnected || !isMainnet}
+            >
+              Probe STRK20
             </button>
           </div>
           {deployResult ? <ResultCard r={deployResult} /> : null}
