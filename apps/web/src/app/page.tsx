@@ -1083,8 +1083,12 @@ export default function Page() {
         rows: [
           { label: "Swap", value: `${swapAmount} ${fromInfo.symbol} → ${formatTokenAmount(num.toBigInt(quote.buyAmount), toInfo.decimals)} ${toInfo.symbol}` },
           { label: "GameShield fee", value: `0.25% (${constants.AVNU_FEE_BPS} bps)` },
+          ...(quote.gasFeesInUsd !== undefined
+            ? [{ label: "Est. network fee", value: `$${Number(quote.gasFeesInUsd).toFixed(3)}` }]
+            : []),
           { label: "Route", value: quote.routes.map((r) => `${r.percent}% ${r.name}`).join(" · ") },
         ],
+        note: "Ready X can show a large network fee for contracts it has not verified (e.g. the AVNU router). That is Ready X's fee-review margin, not GameShield's fee. If it looks excessive, reject, retry once — the fee review usually settles to a normal value on retry.",
       });
       const result = await executeSwap({
         provider: myWalletAccount,
@@ -1442,6 +1446,11 @@ export default function Page() {
           <div className={styles.hint}>
             <b className={styles.mono}>{constants.AVNU_FEE_BPS} bps</b> integrator fee goes to
             GameShield on every swap. Topping up swap tokens is a bridge away — see below.
+          </div>
+          <div className={styles.hint}>
+            Ready X charges a fee-review margin on contracts it has not verified yet (like the
+            AVNU router). If the wallet shows an unusually large network fee, reject and retry
+            once — the fee review settles to a normal value on the second attempt.
           </div>
           {swapResult ? <ResultCard r={swapResult} /> : null}
         </section>
