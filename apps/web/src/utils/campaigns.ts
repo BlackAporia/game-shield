@@ -29,15 +29,17 @@ export function statusName(status: number): CampaignStatusName {
   return CAMPAIGN_STATUS[status] ?? "Active";
 }
 
-// starknet.js v10 parses Cairo enums as { variant: { Active: {} } }. Convert to
-// the numeric index used by CAMPAIGN_STATUS so status comparisons work.
+// starknet.js v10 parses Cairo enums as { variant: { Active: {}, Completed:
+// undefined, Cancelled: undefined } } — every enum key is present but only the
+// active variant carries a value ({}). The other keys are undefined, so they
+// must be checked by value, not with `in` (which is always true).
 export function parseCampaignStatus(value: any): number {
   if (typeof value === "number" || typeof value === "bigint") return Number(value);
   const v = value?.variant;
   if (v && typeof v === "object") {
-    if ("Active" in v) return 0;
-    if ("Completed" in v) return 1;
-    if ("Cancelled" in v) return 2;
+    if (v.Active !== undefined) return 0;
+    if (v.Completed !== undefined) return 1;
+    if (v.Cancelled !== undefined) return 2;
   }
   return Number(value);
 }
