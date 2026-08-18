@@ -373,7 +373,14 @@ export default function Page() {
         title: "Checking private transaction…",
         note: "The wallet is preparing and simulating the STRK20 proof before submission.",
       });
-      await myWalletAccount.strk20PrepareInvoke(actions, true);
+      try {
+        await myWalletAccount.strk20PrepareInvoke(actions, true);
+      } catch (preflightErr: any) {
+        // Not all wallets implement the preflight method. Fall back to direct
+        // submission (matching the official strk20-by-example flow); the wallet
+        // still validates and proves the same actions itself.
+        console.warn("STRK20 preflight skipped:", preflightErr?.message ?? preflightErr);
+      }
       const r = await myWalletAccount.strk20InvokeTransaction(actions);
       txH = r.transaction_hash;
     } catch (e: any) {
