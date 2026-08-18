@@ -40,6 +40,18 @@ The dapp never touches viewing keys — the wallet (Wallet API 0.10.3, e.g. Read
 - `strk20.json` — mainnet transactions, contracts, demo links (filled as they exist).
 - `docs/strk20-integration.md` — integration research, mainnet parameters, transaction plan.
 
+## On-chain deployment (mainnet)
+
+| Component | Address |
+| --- | --- |
+| CampaignRegistry | `0x03ce58babb9bc3651131657c273aae00cca554ffdccb13dba8b2d06ce60d61d5` |
+| PayoutHelper | `0x034525253fd76049c7472059b522cdb51bc1963d35c30eee6deb20f6b4259256` |
+
+Both are verified on-chain (class + state readable). The helper is linked to the
+registry via `set_helper`. Registry state is authoritative: 5 test campaigns
+were created and all cancelled on-chain (status `Cancelled`), so the list is
+empty and ready for real bounties.
+
 ## Verify locally
 
 The contracts require Scarb `2.18.0` and Starknet Foundry `0.60.0`:
@@ -58,8 +70,8 @@ Expected result: 10 tests passed. `scarb test` is not the project test command; 
 - [x] PHASE 2 — GitHub repo + skeleton + registration PR (#86, blocked by a dead registry entry on the sprint repo — not ours)
 - [x] PHASE 3 — Cairo prototype (campaign registry + `privacy_invoke` helper); unit tests are mock-based
 - [x] PHASE 4 — web app (Next.js on the STRK20 starter kit base) — **live: https://gameshield-dapp.vercel.app**
-- [ ] PHASE 5 — production-compatible wallet validation, escrow-helper redesign, and three qualifying mainnet STRK20 transactions
-- [ ] PHASE 6 — demo video + submission
+- [ ] PHASE 5 — three qualifying mainnet STRK20 pool transactions (shield + private payouts through the helper); the wallet holds ~3,895 STRK and is ready
+- [ ] PHASE 6 — demo video + submission (strk20.json `transactions` / `demo_video`)
 
 ## License
 

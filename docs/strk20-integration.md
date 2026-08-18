@@ -73,7 +73,16 @@ Requires the organizer's wallet with STRK on mainnet (real funds — user action
 - PHASE 4 prototype: Next.js app in `apps/web` (build passes): campaign create, helper Fund/Payout preparation, and event parsing. Ready X fee-review compatibility for ordinary registry invokes remains unverified and currently fails in the observed create-campaign flow.
 - Verified on mainnet via RPC: STRK = 0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d ("Starknet Token"), pool = 0x040337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a (deployed).
 
+## 7b. Status update (2026-08-18 — full audit)
+
+- **Deployment verified on-chain**: registry 0x03ce58babb…61d5 and helper 0x034525253f…9256 both have live classes; `set_helper` linkage confirmed; 5 test campaigns all `Cancelled` (cancel txns landed: blocks 13478726–13478791). Ready X fee review failed transiently once then succeeded on retry.
+- **Builds green**: `tsc --noEmit` + `next build` (Next.js 16.3.1) pass; Cairo builds with scarb 2.18.0 (`asdf` pinned in `.tool-versions`); `snforge test` 10/10 pass.
+- **Secrets**: no keys/tokens in git; `.env*` ignored; only public RPC + contract addresses configured.
+- **Live site**: gameshield-dapp.vercel.app serves the latest commit (page chunk 0c81fccb77dbf881 contains both contract addresses + enum-variant parsing); Vercel project `gameshield` (env: NEXT_PUBLIC_REGISTRY_ADDRESS, NEXT_PUBLIC_HELPER_ADDRESS) auto-deploys from GitHub main.
+- **Registration**: PR #86 passes the registration check; the only blocker is the dead `veilance-market` entry on the sprint repo main, which fails shared validation for every open PR since Aug 17 10:54. Removal PR #93 (registry.json + registry-removals.json) passes both validators but the bot only applies single-file PRs — it needs a maintainer merge. Maintainer nudged on #93 and #96.
+- **Qualifying transactions**: none yet. Rules require ≥3 mainnet txns that touch the STRK20 pool AND carry an event from one of our contracts. The dapp's Fund (helper `Funded` event) and Payout (`PayoutCommitted`) flows qualify; shield/unshield alone do not (no event from our contracts). Organizer wallet holds ~3,895 STRK on mainnet. Plan: create bounty → shield → Fund → Complete → Payout (x2) gives 3+ qualifying txns; fill `transactions` in strk20.json after each.
+
 ## 8. Next phases
 
-5. Deploy registry + helper (starkli or wallet) + 3 mainnet transactions — needs user's wallet with STRK
-6. strk20.json fill + demo video + submit
+5. Run the 3 qualifying mainnet transactions (Fund + 2 Payouts through the helper) with the organizer wallet, then list the hashes in strk20.json
+6. Demo video (≤3 min) + verify the project row renders on strk20.starknet.io/hackathon
