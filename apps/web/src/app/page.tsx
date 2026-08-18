@@ -1194,6 +1194,13 @@ export default function Page() {
                         <button
                           className={`${styles.btn} ${styles.btnSmall}`}
                           disabled={busy[c.id] !== undefined}
+                          onClick={() => handleFund(c)}
+                        >
+                          {busy[c.id] === "fund" ? "…" : "Fund reward"}
+                        </button>
+                        <button
+                          className={`${styles.btn} ${styles.btnSmall}`}
+                          disabled={busy[c.id] !== undefined}
                           onClick={() => handleCancel(c)}
                         >
                           {busy[c.id] === "cancel" ? "…" : "Delete campaign"}
