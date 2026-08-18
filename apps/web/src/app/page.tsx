@@ -252,7 +252,9 @@ export default function Page() {
       const count = await getCampaignCount(provider, registry);
       const all: Campaign[] = [];
       for (let id = 1; id <= count; id++) {
-        all.push(await getCampaign(provider, registry, id));
+        const c = await getCampaign(provider, registry, id);
+        if (c.status === 2) continue;
+        all.push(c);
       }
       setCampaigns(all.reverse());
     } catch (e: any) {
@@ -1186,6 +1188,17 @@ export default function Page() {
                         <b className={styles.mono}>{metadataVerified ? "verified" : shortHex(c.criteriaHash)}</b>
                       </div>
                     </div>
+                    {isOrganizer && c.status === 0 && (
+                      <div className={styles.campaignActions}>
+                        <button
+                          className={`${styles.btn} ${styles.btnSmall}`}
+                          disabled={busy[c.id] !== undefined}
+                          onClick={() => handleCancel(c)}
+                        >
+                          {busy[c.id] === "cancel" ? "…" : "Delete campaign"}
+                        </button>
+                      </div>
+                    )}
                     <WinnerForm c={c} />
                     {r ? <ResultCard r={r} /> : null}
                   </div>
