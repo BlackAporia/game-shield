@@ -478,9 +478,11 @@ export default function Page() {
     try {
       const api: any = await (myWalletAccount as any).supportedWalletApi?.();
       const specs: any = await (myWalletAccount as any).supportedSpecs?.();
-      const methods = api?.methods ?? [];
+      const methods: string[] = api?.methods ?? [];
       const declareOk = methods.includes("wallet_addDeclareTransaction");
       const deployOk = methods.includes("wallet_addDeployAccountTransaction");
+      const strk20Methods = methods.filter((m) => m.includes("strk20"));
+      const v6Methods = methods.filter((m) => m.includes("strk20") || m.includes("prepareInvoke"));
       setDeployResult({
         status: "ok",
         title: `Wallet API: declare ${declareOk ? "SUPPORTED" : "NOT SUPPORTED"}`,
@@ -488,9 +490,19 @@ export default function Page() {
           { label: "wallet_addDeclareTransaction", value: declareOk ? "yes" : "no" },
           { label: "wallet_addInvokeTransaction", value: methods.includes("wallet_addInvokeTransaction") ? "yes" : "no" },
           { label: "wallet_addDeployAccountTransaction", value: deployOk ? "yes" : "no" },
+          { label: "wallet_strk20InvokeTransaction", value: methods.includes("wallet_strk20InvokeTransaction") ? "yes" : "no" },
+          { label: "wallet_strk20PrepareInvoke", value: methods.includes("wallet_strk20PrepareInvoke") ? "yes" : "no" },
+          { label: "wallet_strk20Balances", value: methods.includes("wallet_strk20Balances") ? "yes" : "no" },
+          { label: "API versions", value: String(api?.versions ?? JSON.stringify(api ?? [])) },
           { label: "Specs", value: String(specs?.specs ?? JSON.stringify(specs ?? [])) },
+          ...(strk20Methods.length
+            ? [{ label: "Other strk20 methods", value: strk20Methods.join(", ") }]
+            : []),
         ],
-        note: "If declare is NOT supported, the wallet cannot deploy contracts. Use Argent X extension or starkli instead, then paste the addresses.",
+        note:
+          v6Methods.length
+            ? `STRK20 Wallet API methods advertised: ${v6Methods.join(", ")}.`
+            : "Wallet does NOT advertise any strk20 methods — private actions (Fund/Payout) cannot work through this wallet's Wallet API.",
       });
     } catch (e: any) {
       setDeployResult(errorResult(e?.message ?? String(e)));
