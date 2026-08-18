@@ -261,7 +261,12 @@ export default function Page() {
       }
       setCampaigns(all.reverse());
     } catch (e: any) {
-      setError(e?.message ?? String(e));
+      const message = e?.message ?? String(e);
+      setError(
+        message.includes("Cannot convert undefined to a BigInt")
+          ? "Old GameShield contract detected. Open Developer settings and click Deploy contracts to redeploy."
+          : message
+      );
     } finally {
       setLoading(false);
     }
@@ -665,7 +670,7 @@ export default function Page() {
       };
       const registryOk = abiHas(registryClassObj?.abi, "get_campaign_count");
       const helperOk = abiHas(helperClassObj?.abi, "privacy_invoke");
-      // Fallback: if ABI could not be fetched, accept known v1/v2 class hashes plus
+      // Fallback: if ABI could not be fetched, accept only current v3 class hashes plus
       // the most recently deployed class hashes saved by handleDeploy.
       let registryAccepted = registryOk;
       let helperAccepted = helperOk;
@@ -675,13 +680,9 @@ export default function Page() {
           provider.getClassHashAt(hel),
         ]);
         const knownRegistry = [
-          "0x0043f1247fc09a89c13d776d13e8b6c7814d93193b64c0615e10238392edf038",
-          "0x02f99b411abfa12ffc433bdb4b557dda5905b8fda37f6aa357a4e4ad92c530fc",
           "0x03d66f6b5440217339cb6e70dc6c9f4796e9e9ec374903ce3c9a3db354ef6057",
         ];
         const knownHelper = [
-          "0x0725c73fdb163124aace8e665cdd1c0e4d0678e36e360d75b490d08906d62df0",
-          "0x07d04f0a23b8e149041a98c0a8359927e1f0d72cea06f764e5c41ff2ca306d13",
           "0x0b05e4056756329c29a6259ee650ea5f7a6a61a8ddc3f6f7a9701b4edc7e63",
         ];
         let lastDeployed: any = {};
@@ -972,7 +973,17 @@ export default function Page() {
       try {
         await provider.callContract(calls[0]);
       } catch (e: any) {
-        setResultCreate(errorResult(`Campaign contract simulation failed: ${e?.message ?? String(e)}`));
+        const message = e?.message ?? String(e);
+        const isOldContract =
+          message.toLowerCase().includes("input too long") ||
+          message.toLowerCase().includes("selector");
+        setResultCreate(
+          errorResult(
+            isOldContract
+              ? "The deployed CampaignRegistry at this address does not match GameShield v3. Open Developer settings and click Deploy contracts to redeploy the current version."
+              : `Campaign contract simulation failed: ${message}`
+          )
+        );
         return;
       }
       let txH: string;
