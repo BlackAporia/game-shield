@@ -268,6 +268,20 @@ export default function Page() {
     refreshCampaigns();
   }, [refreshCampaigns, myFrontendProviderIndex]);
 
+  // Hard refresh: bypass the browser cache so a stale JS bundle can never hide
+  // on-chain state changes (e.g. campaigns cancelled in another tab/session).
+  // A new query parameter forces the browser to re-fetch the HTML, which in
+  // turn references the newest hashed JS chunks instead of cached ones.
+  const hardRefresh = () => {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set("v", String(Date.now()));
+      window.location.href = url.toString();
+    } catch {
+      window.location.reload();
+    }
+  };
+
   // ─── private STRK20 submit ────────────────────────────────────────────────
 
   const refreshShielded = useCallback(async () => {
@@ -1137,9 +1151,23 @@ export default function Page() {
             <section className={styles.section} id="campaigns">
               <h2 className={styles.sectionTitle}>
                 Campaigns
-                <button className={styles.refresh} onClick={refreshCampaigns} disabled={loading}>
-                  {loading ? "…" : "↻"}
-                </button>
+                <span className={styles.refreshGroup}>
+                  <button
+                    className={styles.refresh}
+                    onClick={refreshCampaigns}
+                    disabled={loading}
+                    title="Refresh campaign list from the chain"
+                  >
+                    {loading ? "…" : "↻"}
+                  </button>
+                  <button
+                    className={styles.refresh}
+                    onClick={hardRefresh}
+                    title="Hard refresh — reload the app, bypassing the browser cache (use if campaign changes do not appear)"
+                  >
+                    ⟳
+                  </button>
+                </span>
               </h2>
               {error ? <div className={styles.warn}>{error}</div> : null}
               {!loading && !campaigns.length ? (

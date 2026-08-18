@@ -490,8 +490,15 @@
   text-transform: uppercase;
 }
 
-.refresh {
+.refreshGroup {
   margin-left: auto;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.refresh {
+  margin-left: 0;
   border: 1px solid rgba(157, 77, 255, 0.3);
   background: rgba(157, 77, 255, 0.1);
   color: var(--muted);
