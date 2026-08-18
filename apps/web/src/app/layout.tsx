@@ -1,7 +1,6 @@
 import type { Metadata } from 'next'
 import { Inter, Space_Grotesk, JetBrains_Mono } from 'next/font/google'
 import './globals.css'
-import './uni-globals.css'
 
 // Matches starknet-gaming.com: Inter for UI, Space Grotesk for display,
 // JetBrains Mono for addresses / hashes.
