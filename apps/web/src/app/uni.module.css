@@ -1,36 +1,5 @@
 /* ─── GameShield — modern glassmorphism UI ────────────────────────────────── */
-
-:root {
-  --bg-0: #050714;
-  --bg-1: #0a0c1f;
-  --bg-2: #11132b;
-  --paper: #f4f5ff;
-  --paper-soft: #d8dbf4;
-  --muted: #9aa1cc;
-  --muted-soft: #6b7299;
-  --violet: #9d4dff;
-  --violet-soft: #6b2bd9;
-  --cyan: #49f0ff;
-  --cyan-soft: #1ec5d7;
-  --rose: #ff5577;
-  --emerald: #2bd9a7;
-  --amber: #ffb547;
-  --accent: var(--violet);
-  --accent-2: var(--cyan);
-  --ring: rgba(73, 240, 255, 0.45);
-  --shadow-glow: 0 0 36px -10px rgba(157, 77, 255, 0.55);
-  --radius-sm: 10px;
-  --radius-md: 16px;
-  --radius-lg: 22px;
-  --radius-xl: 28px;
-  --font-body: var(--font-body), "Inter", system-ui, -apple-system, sans-serif;
-  --font-display: var(--font-display), "Space Grotesk", system-ui, sans-serif;
-  --font-mono-ui: var(--font-mono-ui), "JetBrains Mono", ui-monospace, monospace;
-  --duration-fast: 160ms;
-  --duration: 240ms;
-  --duration-slow: 480ms;
-  --easing: cubic-bezier(0.2, 0.8, 0.2, 1);
-}
+/* Global tokens & reset live in ./uni-globals.css (loaded by layout). */
 
 /* ─── Global page chrome ─────────────────────────────────────────────────── */
 
@@ -1176,15 +1145,6 @@ select.input option {
 @keyframes fadeInUp {
   from { opacity: 0; transform: translateY(12px); }
   to { opacity: 1; transform: translateY(0); }
-}
-@media (prefers-reduced-motion: reduce) {
-  :global(*),
-  :global(*::before),
-  :global(*::after) {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
 }
 
 /* ─── Responsive ─────────────────────────────────────────────────────────── */
