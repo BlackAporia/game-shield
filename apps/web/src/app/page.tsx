@@ -892,6 +892,7 @@ export default function Page() {
     const isOrganizer = connectedAddress && validateAddr(connectedAddress) === c.organizer;
     const isActive = c.status === 0;
     const canPayout = isOrganizer && c.status === 1 && !c.paid;
+    if (!isOrganizer || (!isActive && !canPayout)) return null;
 
     const submitWinner = (mode: "complete" | "payout") => {
       try {

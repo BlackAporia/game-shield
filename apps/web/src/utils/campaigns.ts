@@ -29,6 +29,27 @@ export function statusName(status: number): CampaignStatusName {
   return CAMPAIGN_STATUS[status] ?? "Active";
 }
 
+// starknet.js v10 parses Cairo enums as { variant: { Active: {} } }. Convert to
+// the numeric index used by CAMPAIGN_STATUS so status comparisons work.
+export function parseCampaignStatus(value: any): number {
+  if (typeof value === "number" || typeof value === "bigint") return Number(value);
+  const v = value?.variant;
+  if (v && typeof v === "object") {
+    if ("Active" in v) return 0;
+    if ("Completed" in v) return 1;
+    if ("Cancelled" in v) return 2;
+  }
+  return Number(value);
+}
+
+// Same for the Cairo bool — it can come back as { variant: { True: {} } }.
+export function parseCairoBool(value: any): boolean {
+  if (typeof value === "boolean") return value;
+  const v = value?.variant;
+  if (v && typeof v === "object") return "True" in v;
+  return Boolean(value);
+}
+
 // Winner entitlement commitment: poseidon(campaign_id, winner_address). Computed
 // client-side; only the hash ever reaches the registry and the helper, so the
 // winner's address is never published on-chain.
@@ -64,9 +85,9 @@ export async function getCampaign(
     rewardAmount: num.toBigInt(raw.reward_amount),
     deadline: num.toBigInt(raw.deadline),
     criteriaHash: num.toHex(raw.criteria_hash as string),
-    status: Number(raw.status),
+    status: parseCampaignStatus(raw.status),
     winnerCommitment: num.toHex(raw.winner_commitment as string),
-    paid: Boolean(raw.paid),
+    paid: parseCairoBool(raw.paid),
   };
 }
 
