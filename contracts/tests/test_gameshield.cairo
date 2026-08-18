@@ -15,6 +15,7 @@ const ORGANIZER: felt252 = 'organizer';
 const ALICE: felt252 = 'alice';
 const POOL: felt252 = 'pool';
 const CRITERIA: felt252 = 'criteria-v1';
+const TOKEN: felt252 = 'token';
 
 fn addr(felt: felt252) -> ContractAddress {
     felt.try_into().unwrap()
@@ -56,7 +57,15 @@ fn mint(token: ContractAddress, account: ContractAddress, amount: u128) {
 fn create_campaign(registry: ContractAddress, reward: u128, deadline: u64) -> u64 {
     cheat_caller_for(registry, ORGANIZER);
     ICampaignRegistryDispatcher { contract_address: registry }
-        .create_campaign(reward, deadline, CRITERIA)
+        .create_campaign(reward, deadline, CRITERIA, addr(TOKEN))
+}
+
+fn create_campaign_token(
+    registry: ContractAddress, reward: u128, deadline: u64, token: ContractAddress,
+) -> u64 {
+    cheat_caller_for(registry, ORGANIZER);
+    ICampaignRegistryDispatcher { contract_address: registry }
+        .create_campaign(reward, deadline, CRITERIA, token)
 }
 
 fn complete_campaign(registry: ContractAddress, id: u64, commitment: felt252) {
@@ -90,7 +99,7 @@ fn zero_reward_rejected() {
     let registry = deploy_registry();
     cheat_caller_for(registry, ORGANIZER);
     ICampaignRegistryDispatcher { contract_address: registry }
-        .create_campaign(0, 100, CRITERIA);
+        .create_campaign(0, 100, CRITERIA, addr(TOKEN));
 }
 
 #[test]
@@ -104,9 +113,10 @@ fn complete_and_validate_payout() {
 
     let campaign = dispatcher.get_campaign(id);
     assert!(campaign.winner_commitment == commitment, "commitment stored");
-    assert!(dispatcher.is_payout_valid(id, commitment, 1000), "payout must be valid");
-    assert!(!dispatcher.is_payout_valid(id, 0x9999, 1000), "wrong commitment rejected");
-    assert!(!dispatcher.is_payout_valid(id, commitment, 500), "wrong amount rejected");
+    assert!(dispatcher.is_payout_valid(id, commitment, 1000, addr(TOKEN)), "payout must be valid");
+    assert!(!dispatcher.is_payout_valid(id, 0x9999, 1000, addr(TOKEN)), "wrong commitment rejected");
+    assert!(!dispatcher.is_payout_valid(id, commitment, 500, addr(TOKEN)), "wrong amount rejected");
+    assert!(!dispatcher.is_payout_valid(id, commitment, 1000, addr(ALICE)), "wrong token rejected");
 }
 
 #[test]
@@ -138,7 +148,7 @@ fn fund_flow_returns_open_note() {
     let helper = deploy_helper(registry);
     let token = deploy_erc20();
 
-    let id = create_campaign(registry, 1000, 100);
+    let id = create_campaign_token(registry, 1000, 100, token);
     mint(token, helper, 1000);
 
     let deposits = invoke_as_pool(helper, Operation::Fund, id, token, 1000, 0, 0x1111);
@@ -173,7 +183,7 @@ fn payout_flow_marks_paid() {
     let token = deploy_erc20();
 
     let dispatcher = ICampaignRegistryDispatcher { contract_address: registry };
-    let id = create_campaign(registry, 1000, 100);
+    let id = create_campaign_token(registry, 1000, 100, token);
     let commitment: felt252 = 0x4242;
     complete_campaign(registry, id, commitment);
 
@@ -200,7 +210,7 @@ fn double_payout_rejected() {
     let helper = deploy_helper(registry);
     let token = deploy_erc20();
 
-    let id = create_campaign(registry, 1000, 100);
+    let id = create_campaign_token(registry, 1000, 100, token);
     let commitment: felt252 = 0x4242;
     complete_campaign(registry, id, commitment);
 
@@ -222,7 +232,7 @@ fn cannot_fund_cancelled_campaign() {
     let helper = deploy_helper(registry);
     let token = deploy_erc20();
 
-    let id = create_campaign(registry, 1000, 100);
+    let id = create_campaign_token(registry, 1000, 100, token);
     cheat_caller_for(registry, ORGANIZER);
     ICampaignRegistryDispatcher { contract_address: registry }.cancel_campaign(id);
 
