@@ -811,7 +811,7 @@ export default function Page() {
         {
           type: "invoke",
           contract: helper,
-          calldata: ["0", num.toHex(c.id), num.toHex(constants.addrSTRK), num.toHex(c.rewardAmount), "0x0", "${openNoteIds[0]}"],
+          calldata: ["0x0", num.toHex(c.id), num.toHex(constants.addrSTRK), num.toHex(c.rewardAmount), "0x0", "${openNoteIds[0]}"],
         },
       ];
       await submitPrivate(actions, c.id, "Funding campaign");
@@ -857,7 +857,7 @@ export default function Page() {
         {
           type: "invoke",
           contract: helper,
-          calldata: ["1", num.toHex(c.id), num.toHex(constants.addrSTRK), num.toHex(c.rewardAmount), commitment, "${openNoteIds[0]}"],
+          calldata: ["0x1", num.toHex(c.id), num.toHex(constants.addrSTRK), num.toHex(c.rewardAmount), commitment, "${openNoteIds[0]}"],
         },
       ];
       await submitPrivate(actions, c.id, "Payout reward");
