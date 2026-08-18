@@ -533,6 +533,15 @@ export default function Page() {
       note: "Approve each popup, or reject; the probe records the wallet's response either way.",
     });
     const rows = [];
+    const deposit1: WALLET_API.STRK20_ACTION[] = [
+      { type: "deposit", token: constants.addrSTRK, amount: num.toHex(1n) },
+    ];
+    const transferAmount: WALLET_API.STRK20_ACTION[] = [
+      { type: "transfer", token: constants.addrSTRK, amount: num.toHex(1n), recipient: connectedAddress },
+    ];
+    const withdraw1: WALLET_API.STRK20_ACTION[] = [
+      { type: "withdraw", token: constants.addrSTRK, amount: num.toHex(1n), recipient: connectedAddress },
+    ];
     const transferOpen: WALLET_API.STRK20_ACTION[] = [
       { type: "transfer", token: constants.addrSTRK, amount: "OPEN", recipient: connectedAddress },
     ];
@@ -540,19 +549,12 @@ export default function Page() {
       { type: "withdraw", token: constants.addrSTRK, amount: num.toHex(1n), recipient: helper },
       { type: "transfer", token: constants.addrSTRK, amount: "OPEN", recipient: connectedAddress },
     ];
-    const fullFund: WALLET_API.STRK20_ACTION[] = [
-      { type: "withdraw", token: constants.addrSTRK, amount: num.toHex(1n), recipient: helper },
-      { type: "transfer", token: constants.addrSTRK, amount: "OPEN", recipient: connectedAddress },
-      {
-        type: "invoke",
-        contract: helper,
-        calldata: ["0x0", num.toHex(1), num.toHex(constants.addrSTRK), num.toHex(1n), "0x0", "${openNoteIds[0]}"],
-      },
-    ];
     for (const [actions, label] of [
-      [transferOpen, "transfer OPEN only"],
+      [deposit1, "deposit 1 wei"],
+      [transferAmount, "transfer 1 wei (no OPEN)"],
+      [withdraw1, "withdraw 1 wei to self"],
+      [transferOpen, "transfer OPEN"],
       [noInvoke, "withdraw + transfer OPEN"],
-      [fullFund, "withdraw + transfer OPEN + invoke"],
     ] as const) {
       const r = await probeVariant(actions, label);
       rows.push({ label: r.label, value: r.value });
@@ -561,7 +563,7 @@ export default function Page() {
       status: "ok",
       title: "Probe results",
       rows,
-      note: "If variants 1–2 are accepted but 3 is rejected, Ready X does not support the invoke action.",
+      note: "If deposit/transfer-with-amount are accepted but OPEN variants are rejected, Ready X does not implement the OPEN literal yet.",
     });
   };
 
