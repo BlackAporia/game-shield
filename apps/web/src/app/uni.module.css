@@ -996,6 +996,20 @@
 .footerDot {
   opacity: 0.5;
 }
+.footerLink {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: 800 12px/1 var(--font-body), sans-serif;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.footerLink:hover {
+  color: var(--paper);
+  border-color: rgba(157, 77, 255, 0.5);
+}
 
 /* ─── animations ───────────────────────────────────────────────────────── */
 

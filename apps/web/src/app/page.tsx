@@ -157,6 +157,8 @@ export default function Page() {
   const [shieldResult, setShieldResult] = useState<ActionResult | null>(null);
   const [shielding, setShielding] = useState(false);
 
+  const [showDev, setShowDev] = useState(false);
+
   // deployment
   type Deployed = { registry: string; helper: string };
   const [deployed, setDeployed] = useState<Deployed>(() => {
@@ -959,36 +961,35 @@ export default function Page() {
       <header className={styles.hero}>
         <span className={styles.eyebrow}>STRK20 Private Sprint 2026</span>
         <h1 className={styles.heroTitle}>
-          Private Gaming
+          Private Rewards
           <br />
-          <span className={styles.heroAccent}>Bounty Hub</span>
+          <span className={styles.heroAccent}>for Onchain Games</span>
         </h1>
         <p className={styles.heroSub}>
-          Manage campaign metadata publicly and deliver rewards through STRK20 shielded notes.
-          Public amounts and timing can still be correlated.
+          Gaming rewards are usually public. GameShield lets games distribute rewards
+          privately using STRK20 shielded notes — without publishing who won.
         </p>
       </header>
 
       <main className={styles.main}>
         <section className={styles.workflow} id="how-it-works">
           <div className={styles.workflowHead}>
-            <span className={styles.eyebrow}>Campaign lifecycle</span>
-            <h2>How GameShield works</h2>
-            <p>Public campaign coordination with STRK20 shielded reward delivery. Each step below states exactly what is public and what remains wallet-managed.</p>
+            <span className={styles.eyebrow}>How it works</span>
+            <h2>Three actions, private rewards</h2>
+            <p>Non-custodial MVP — GameShield coordinates gaming bounties and enables private
+            STRK20 reward delivery. Funds are not held in escrow.</p>
           </div>
           <div className={styles.workflowGrid}>
-            <article className={styles.workflowStep}><span>01</span><h3>Shield</h3><p>Move public STRK into your wallet-managed private balance. Deposits remain visible on-chain.</p></article>
-            <article className={styles.workflowStep}><span>02</span><h3>Create</h3><p>Publish reward, exact deadline and a commitment to the detailed campaign metadata.</p></article>
-            <article className={styles.workflowStep}><span>03</span><h3>Funding signal</h3><p>Record a STRK20 helper interaction. The current helper returns funds to the organizer and is not escrow.</p></article>
-            <article className={styles.workflowStep}><span>04</span><h3>Complete</h3><p>The organizer commits the selected winner address without publishing it as plaintext.</p></article>
-            <article className={styles.workflowStep}><span>05</span><h3>Private payout</h3><p>Deliver the reward as an open shielded note. Campaign, amount and timing remain observable.</p></article>
-            <article className={styles.workflowStep}><span>06</span><h3>Cancel</h3><p>Cancel an active campaign. The deployed contract records status but does not enforce automatic refunds.</p></article>
+            <article className={styles.workflowStep}><span>01</span><h3>Create bounty</h3><p>Connect a wallet and publish a gaming bounty: public reward, deadline and campaign ID.</p></article>
+            <article className={styles.workflowStep}><span>02</span><h3>Submit / select winner</h3><p>The organizer commits the winning address as a hash — the plaintext address never goes on-chain.</p></article>
+            <article className={styles.workflowStep}><span>03</span><h3>Private payout</h3><p>Deliver the reward as a STRK20 shielded note. Only the winner can reveal the payout.</p></article>
           </div>
         </section>
 
-        {/* Deploy / configure contracts */}
-        <details className={styles.advancedPanel}>
-          <summary>Developer setup · deployed contracts</summary>
+        {/* Deploy / configure contracts — hidden in Developer settings */}
+        {showDev ? (
+        <details className={styles.advancedPanel} open>
+          <summary>Developer settings</summary>
           <section className={styles.section}>
           <h2 className={styles.sectionTitle}>Contract configuration</h2>
           <div className={styles.hint}>
@@ -1042,6 +1043,7 @@ export default function Page() {
           {deployResult ? <ResultCard r={deployResult} /> : null}
           </section>
         </details>
+        ) : null}
 
         {/* Shield / unshield */}
         <section className={styles.section}>
@@ -1080,8 +1082,8 @@ export default function Page() {
 
         {!hasContracts ? (
           <div className={styles.warn}>
-            Contracts not configured. Deploy CampaignRegistry + PayoutHelper and set
-            NEXT_PUBLIC_REGISTRY_ADDRESS / NEXT_PUBLIC_HELPER_ADDRESS, then restart.
+            GameShield contracts are not configured yet. Open Developer settings in the footer
+            to deploy or paste the deployed Registry and Helper addresses.
           </div>
         ) : (
           <>
@@ -1184,26 +1186,6 @@ export default function Page() {
                         <b className={styles.mono}>{metadataVerified ? "verified" : shortHex(c.criteriaHash)}</b>
                       </div>
                     </div>
-                    <div className={styles.campaignActions}>
-                      {isOrganizer && c.status === 0 && (
-                        <button
-                          className={`${styles.btn} ${styles.btnSmall}`}
-                          disabled={busy[c.id] !== undefined}
-                          onClick={() => handleFund(c)}
-                        >
-                          {busy[c.id] === "fund" ? "…" : "Record funding signal"}
-                        </button>
-                      )}
-                      {isOrganizer && c.status === 0 && (
-                        <button
-                          className={`${styles.btn} ${styles.btnSmall}`}
-                          disabled={busy[c.id] !== undefined}
-                          onClick={() => handleCancel(c)}
-                        >
-                          {busy[c.id] === "cancel" ? "…" : "Cancel"}
-                        </button>
-                      )}
-                    </div>
                     <WinnerForm c={c} />
                     {r ? <ResultCard r={r} /> : null}
                   </div>
@@ -1218,6 +1200,10 @@ export default function Page() {
         <span>Powered by STRK20 privacy pool · Starknet.js v10.4</span>
         <span className={styles.footerDot}>·</span>
         <span>{networkName ?? "unknown network"}</span>
+        <span className={styles.footerDot}>·</span>
+        <button className={styles.footerLink} onClick={() => setShowDev((v) => !v)}>
+          {showDev ? "Hide developer settings" : "Developer settings"}
+        </button>
       </footer>
     </div>
   );
