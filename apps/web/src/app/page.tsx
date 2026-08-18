@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { hash, num, validateAndParseAddress, type WalletAccountV6 } from "starknet";
+import { getQuotes, executeSwap } from "@avnu/avnu-sdk";
 import type { WALLET_API } from "@starknet-io/types-js";
 import styles from "./uni.module.css";
 import SelectWallet from "./components/client/WalletHandle/SelectWallet";
@@ -16,8 +17,21 @@ import {
   statusName,
   validateAddr,
   winnerCommitment,
-  parseHelperEvents,
 } from "../utils/campaigns";
+import {
+  REWARD_TOKENS,
+  tokenByAddress,
+  formatTokenAmount,
+  parseTokenAmount,
+  symbolFor,
+} from "../utils/tokens";
+import {
+  loadLedger,
+  recordPoints,
+  computeStats,
+  swapPoints,
+  POINTS_PER,
+} from "../utils/points";
 import CampaignRegistrySierra from "../contracts/CampaignRegistry.sierra.json";
 import CampaignRegistryCasm from "../contracts/CampaignRegistry.casm.json";
 import PayoutHelperSierra from "../contracts/PayoutHelper.sierra.json";
@@ -95,6 +109,7 @@ type CampaignMetadata = {
   description: string;
   deadline: string;
   reward: string;
+  token: string;
   organizer: string;
   commitment: string;
 };
@@ -125,6 +140,57 @@ function errorResult(msg: string): ActionResult {
   return { status: "error", title: "Action failed", note: msg };
 }
 
+function RatingPanel({ ledger }: { ledger: ReturnType<typeof loadLedger> }) {
+  const stats = computeStats(ledger);
+  const recent = ledger.slice(-5).reverse();
+  return (
+    <div className={styles.ratingGrid}>
+      <div className={styles.ratingCard}>
+        <span className={styles.ratingLabel}>Level</span>
+        <b className={styles.ratingBig}>{stats.level}</b>
+        {stats.nextLevel ? (
+          <span className={styles.ratingSmall}>
+            {stats.toNext} pts to {stats.nextLevel}
+          </span>
+        ) : (
+          <span className={styles.ratingSmall}>max level</span>
+        )}
+      </div>
+      <div className={styles.ratingCard}>
+        <span className={styles.ratingLabel}>Points</span>
+        <b className={styles.ratingBig}>{stats.total}</b>
+        <span className={styles.ratingSmall}>
+          {stats.base} base + {stats.streakBonus} streak
+        </span>
+      </div>
+      <div className={styles.ratingCard}>
+        <span className={styles.ratingLabel}>Swaps</span>
+        <b className={styles.ratingBig}>{stats.swaps}</b>
+        <span className={styles.ratingSmall}>
+          ${stats.volumeUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })} volume
+        </span>
+      </div>
+      <div className={styles.ratingCard}>
+        <span className={styles.ratingLabel}>Streak</span>
+        <b className={styles.ratingBig}>{stats.streak}d</b>
+        <span className={styles.ratingSmall}>{stats.activeDays} active days</span>
+      </div>
+      {recent.length ? (
+        <ul className={styles.ratingRecent}>
+          {recent.map((ev, i) => (
+            <li key={i}>
+              <span>{ev.label}</span>
+              <b>+{ev.points}</b>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className={styles.hint}>No activity yet — swap, fund or payout to earn points.</div>
+      )}
+    </div>
+  );
+}
+
 export default function Page() {
   const myWalletAccount = useStoreWallet((s) => s.myWalletAccount);
   const connectedAddress = useStoreWallet((s) => s.address);
@@ -141,6 +207,7 @@ export default function Page() {
   // create form
   const [campaignTitle, setCampaignTitle] = useState("");
   const [rewardStrk, setRewardStrk] = useState("10");
+  const [campaignToken, setCampaignToken] = useState(REWARD_TOKENS[0].address);
   const [deadlineAt, setDeadlineAt] = useState(defaultDeadline);
   const [seats, setSeats] = useState("32");
   const [description, setDescription] = useState("");
@@ -154,8 +221,23 @@ export default function Page() {
   // shielded balance
   const [shielded, setShielded] = useState("");
   const [shieldAmount, setShieldAmount] = useState("10");
+  const [shieldToken, setShieldToken] = useState(REWARD_TOKENS[0].address);
   const [shieldResult, setShieldResult] = useState<ActionResult | null>(null);
   const [shielding, setShielding] = useState(false);
+
+  // swap (AVNU)
+  const [swapFromToken, setSwapFromToken] = useState(REWARD_TOKENS[1].address);
+  const [swapToToken, setSwapToToken] = useState(REWARD_TOKENS[2].address);
+  const [swapAmount, setSwapAmount] = useState("100");
+  const [swapSlippage, setSwapSlippage] = useState(0.005);
+  const [swapResult, setSwapResult] = useState<ActionResult | null>(null);
+  const [swapping, setSwapping] = useState(false);
+
+  // bridge
+  const [bridgeResult, setBridgeResult] = useState<ActionResult | null>(null);
+
+  // rating points
+  const [ledger, setLedger] = useState<ReturnType<typeof loadLedger>>([]);
 
   const [showDev, setShowDev] = useState(false);
 
@@ -290,17 +372,22 @@ export default function Page() {
       return;
     }
     try {
-      const bals = await myWalletAccount.strk20Balances([constants.addrSTRK]);
+      const bals = await myWalletAccount.strk20Balances([shieldToken]);
       const b = bals?.[0]?.balance;
-      setShielded(b !== undefined && b !== null ? fmtStrk(num.toBigInt(b)) : "0");
+      const decimals = tokenByAddress(shieldToken).decimals;
+      setShielded(b !== undefined && b !== null ? formatTokenAmount(num.toBigInt(b), decimals) : "0");
     } catch {
       setShielded("0");
     }
-  }, [myWalletAccount, isMainnet]);
+  }, [myWalletAccount, isMainnet, shieldToken]);
 
   useEffect(() => {
     refreshShielded();
-  }, [refreshShielded, myFrontendProviderIndex]);
+  }, [refreshShielded, myFrontendProviderIndex, shieldToken]);
+
+  useEffect(() => {
+    setLedger(loadLedger());
+  }, []);
 
   const handleShield = async (mode: "deposit" | "withdraw") => {
     if (!myWalletAccount || !connectedAddress) {
@@ -311,11 +398,12 @@ export default function Page() {
       setShieldResult(errorResult("STRK20 actions are available on Mainnet only."));
       return;
     }
+    const tokenInfo = tokenByAddress(shieldToken);
     let amount: bigint;
     try {
-      amount = parseStrkAmount(shieldAmount);
+      amount = parseTokenAmount(shieldAmount, tokenInfo.decimals);
     } catch (e: any) {
-      setShieldResult(errorResult(e?.message ?? "Enter a valid STRK amount."));
+      setShieldResult(errorResult(e?.message ?? "Enter a valid amount."));
       return;
     }
     setShielding(true);
@@ -323,11 +411,11 @@ export default function Page() {
     try {
       const actions: WALLET_API.STRK20_ACTION[] =
         mode === "deposit"
-          ? [{ type: "deposit", token: constants.addrSTRK, amount: num.toHex(amount) }]
+          ? [{ type: "deposit", token: shieldToken, amount: num.toHex(amount) }]
           : [
               {
                 type: "withdraw",
-                token: constants.addrSTRK,
+                token: shieldToken,
                 amount: num.toHex(amount),
                 recipient: connectedAddress,
               },
@@ -337,7 +425,7 @@ export default function Page() {
         status: "pending",
         title: "Waiting for confirmation…",
         rows: [
-          { label: mode === "deposit" ? "Shield" : "Unshield", value: `${shieldAmount} STRK` },
+          { label: mode === "deposit" ? "Shield" : "Unshield", value: `${shieldAmount} ${tokenInfo.symbol}` },
           { label: "Transaction", value: shortHex(r.transaction_hash), hash: r.transaction_hash },
         ],
       });
@@ -346,6 +434,7 @@ export default function Page() {
         receiptToResult(await provider.getTransactionReceipt(r.transaction_hash), r.transaction_hash)
       );
       await refreshShielded();
+      setLedger(recordPoints({ kind: "shield", label: `${mode} ${shieldAmount} ${tokenInfo.symbol}`, points: POINTS_PER.shield }));
     } catch (e: any) {
       setShieldResult(errorResult(e?.message ?? e?.toString?.() ?? String(e)));
     } finally {
@@ -356,7 +445,8 @@ export default function Page() {
   async function submitPrivate(
     actions: WALLET_API.STRK20_ACTION[],
     id: number,
-    label: string
+    label: string,
+    tokenSymbol?: string
   ): Promise<string | undefined> {
     if (!myWalletAccount) {
       setResult(id, errorResult("No WalletAccount available."));
@@ -391,19 +481,12 @@ export default function Page() {
     setResult(id, {
       status: "pending",
       title: "Waiting for confirmation…",
-      rows: [{ label: label, value: "STRK" }, { label: "Transaction", value: shortHex(txH), hash: txH }],
+      rows: [{ label: label, value: tokenSymbol ?? "STRK" }, { label: "Transaction", value: shortHex(txH), hash: txH }],
     });
     try {
       const txR = await provider.waitForTransaction(txH, { retries: 400, retryInterval: 3000 });
       const r = receiptToResult(txR, txH);
-      // Attach privacy events of our helper for verification.
-      const evs = parseHelperEvents(txR, helper);
-      if (evs.length) {
-        const desc = evs
-          .map((ev) => `${ev.name} (campaign ${ev.campaignId}, ${fmtStrk(ev.amount)} STRK)`)
-          .join("; ");
-        r.note = `Verified on-chain: ${desc}`;
-      }
+      r.note = "Private STRK20 action confirmed. The reward moves through the pool — no public link between campaign and winner.";
       setResult(id, r);
     } catch (e: any) {
       setResult(id, {
@@ -583,11 +666,21 @@ export default function Page() {
         provider.getClassHashAt(reg),
         provider.getClassHashAt(hel),
       ]);
-      if (num.toBigInt(registryClass) !== num.toBigInt("0x0043f1247fc09a89c13d776d13e8b6c7814d93193b64c0615e10238392edf038")) {
-        throw new Error("Registry address is not the deployed CampaignRegistry contract.");
+      // v1 (STRK-only) and v2 (multi-token) class hashes are both accepted so
+      // saved addresses from earlier deploys keep working.
+      const knownRegistry = [
+        "0x0043f1247fc09a89c13d776d13e8b6c7814d93193b64c0615e10238392edf038",
+        "0x02f99b411abfa12ffc433bdb4b557dda5905b8fda37f6aa357a4e4ad92c530fc",
+      ];
+      const knownHelper = [
+        "0x0725c73fdb163124aace8e665cdd1c0e4d0678e36e360d75b490d08906d62df0",
+        "0x07d04f0a23b8e149041a98c0a8359927e1f0d72cea06f764e5c41ff2ca306d13",
+      ];
+      if (!knownRegistry.some((h) => num.toBigInt(registryClass) === num.toBigInt(h))) {
+        throw new Error("Registry address is not a deployed CampaignRegistry contract.");
       }
-      if (num.toBigInt(helperClass) !== num.toBigInt("0x0725c73fdb163124aace8e665cdd1c0e4d0678e36e360d75b490d08906d62df0")) {
-        throw new Error("Helper address is not the deployed PayoutHelper contract.");
+      if (!knownHelper.some((h) => num.toBigInt(helperClass) === num.toBigInt(h))) {
+        throw new Error("Helper address is not a deployed PayoutHelper contract.");
       }
       saveDeployed({ registry: reg, helper: hel });
       setDeployResult({
@@ -790,6 +883,7 @@ export default function Page() {
         throw new Error("Campaign must end at least 5 minutes from now.");
       }
       deadline = BigInt(Math.floor(deadlineDate.getTime() / 1000));
+      const tokenInfo = tokenByAddress(campaignToken);
       const metadataPayload = {
         version: 1 as const,
         title,
@@ -797,6 +891,7 @@ export default function Page() {
         description: details,
         deadline: deadline.toString(),
         reward: reward.toString(),
+        token: tokenInfo.symbol,
         organizer: validateAddr(connectedAddress),
       };
       criteriaHash = num.toHex(hash.starknetKeccak(JSON.stringify(metadataPayload)));
@@ -809,7 +904,7 @@ export default function Page() {
       {
         contractAddress: registry,
         entrypoint: "create_campaign",
-        calldata: [num.toHex(reward), num.toHex(deadline), criteriaHash],
+        calldata: [num.toHex(reward), num.toHex(deadline), criteriaHash, campaignToken],
       },
     ];
     setResultCreate({
@@ -860,28 +955,24 @@ export default function Page() {
       setCampaignTitle("");
       setDescription("");
       await refreshCampaigns();
+      setLedger(recordPoints({ kind: "campaign", label: `Create campaign #${campaignId}`, points: POINTS_PER.campaign }));
     } catch (e: any) {
       setResultCreate(errorResult(e?.message ?? String(e)));
     }
   };
 
-  // Fund: withdraw from the organizer's shielded note to the helper, open a note,
-  // and invoke the helper's privacy_invoke(Fund). The helper passes the funds back
-  // into the organizer's open note and emits Funded.
+  // Fund: the organizer privately deposits the reward into the pool. The pool
+  // holds it as a shielded note owned by the organizer — no public link between
+  // campaign and funds.
   const handleFund = async (c: Campaign) => {
     setBusyFor(c.id, "fund");
     try {
       const actions: WALLET_API.STRK20_ACTION[] = [
-        { type: "withdraw", token: constants.addrSTRK, amount: num.toHex(c.rewardAmount), recipient: helper },
-        { type: "transfer", token: constants.addrSTRK, amount: "OPEN", recipient: connectedAddress },
-        {
-          type: "invoke",
-          contract: helper,
-          calldata: ["0x0", num.toHex(c.id), num.toHex(constants.addrSTRK), num.toHex(c.rewardAmount), "0x0", "${openNoteIds[0]}"],
-        },
+        { type: "deposit", token: c.token, amount: num.toHex(c.rewardAmount) },
       ];
-      await submitPrivate(actions, c.id, "Funding campaign");
+      await submitPrivate(actions, c.id, "Funding campaign", symbolFor(c.token));
       await refreshCampaigns();
+      setLedger(recordPoints({ kind: "fund", label: `Fund campaign #${c.id}`, points: POINTS_PER.fund }));
     } finally {
       setBusyFor(c.id);
     }
@@ -910,24 +1001,19 @@ export default function Page() {
     }
   };
 
-  // Payout: private STRK20 payout — the pool withdraws the reward to the helper,
-  // the helper verifies the entitlement commitment, marks the campaign paid and
-  // credits the winner's open note. No public link between bounty and winner.
+  // Payout: private STRK20 payout — the organizer's shielded note is transferred
+  // straight to the winner's shielded balance. The pool never reveals amounts or
+  // the link between the bounty and the winner.
   const handlePayout = async (c: Campaign, winnerAddr: string) => {
     setBusyFor(c.id, "payout");
     try {
       const commitment = winnerCommitment(c.id, winnerAddr);
       const actions: WALLET_API.STRK20_ACTION[] = [
-        { type: "withdraw", token: constants.addrSTRK, amount: num.toHex(c.rewardAmount), recipient: helper },
-        { type: "transfer", token: constants.addrSTRK, amount: "OPEN", recipient: validateAddr(winnerAddr) },
-        {
-          type: "invoke",
-          contract: helper,
-          calldata: ["0x1", num.toHex(c.id), num.toHex(constants.addrSTRK), num.toHex(c.rewardAmount), commitment, "${openNoteIds[0]}"],
-        },
+        { type: "transfer", token: c.token, amount: num.toHex(c.rewardAmount), recipient: validateAddr(winnerAddr) },
       ];
-      await submitPrivate(actions, c.id, "Payout reward");
+      await submitPrivate(actions, c.id, "Payout reward", symbolFor(c.token));
       await refreshCampaigns();
+      setLedger(recordPoints({ kind: "payout", label: `Payout campaign #${c.id}`, points: POINTS_PER.payout }));
     } finally {
       setBusyFor(c.id);
     }
@@ -944,6 +1030,108 @@ export default function Page() {
       await refreshCampaigns();
     } finally {
       setBusyFor(c.id);
+    }
+  };
+
+  // ─── swap (AVNU) ───────────────────────────────────────────────────────────
+
+  const handleSwap = async () => {
+    if (!myWalletAccount || !connectedAddress) {
+      setSwapResult(errorResult("Connect a wallet first."));
+      return;
+    }
+    if (!isMainnet) {
+      setSwapResult(errorResult("Swaps are available on Mainnet only."));
+      return;
+    }
+    const fromInfo = tokenByAddress(swapFromToken);
+    const toInfo = tokenByAddress(swapToToken);
+    let sellAmount: bigint;
+    try {
+      sellAmount = parseTokenAmount(swapAmount, fromInfo.decimals);
+    } catch (e: any) {
+      setSwapResult(errorResult(e?.message ?? "Enter a valid swap amount."));
+      return;
+    }
+    if (num.toHex(swapFromToken) === num.toHex(swapToToken)) {
+      setSwapResult(errorResult("Choose two different tokens."));
+      return;
+    }
+    setSwapping(true);
+    setSwapResult({
+      status: "pending",
+      title: "Finding the best route on AVNU…",
+      note: "Quotes are fetched with GameShield's 0.25% integrator fee included.",
+    });
+    try {
+      const [quote] = await getQuotes({
+        sellTokenAddress: swapFromToken,
+        buyTokenAddress: swapToToken,
+        sellAmount,
+        takerAddress: connectedAddress,
+        integratorFees: BigInt(constants.AVNU_FEE_BPS),
+        integratorFeeRecipient: constants.AVNU_FEE_RECIPIENT,
+        integratorName: constants.AVNU_INTEGRATOR_NAME,
+      });
+      if (!quote) {
+        setSwapResult(errorResult("No liquidity route found for this pair and amount."));
+        return;
+      }
+      setSwapResult({
+        status: "pending",
+        title: "Waiting for wallet confirmation…",
+        rows: [
+          { label: "Swap", value: `${swapAmount} ${fromInfo.symbol} → ${formatTokenAmount(num.toBigInt(quote.buyAmount), toInfo.decimals)} ${toInfo.symbol}` },
+          { label: "GameShield fee", value: `0.25% (${constants.AVNU_FEE_BPS} bps)` },
+          { label: "Route", value: quote.routes.map((r) => `${r.percent}% ${r.name}`).join(" · ") },
+        ],
+      });
+      const result = await executeSwap({
+        provider: myWalletAccount,
+        quote,
+        slippage: swapSlippage,
+      });
+      const txH = result.transactionHash;
+      setSwapResult({
+        status: "pending",
+        title: "Waiting for confirmation…",
+        rows: [{ label: "Transaction", value: shortHex(txH), hash: txH }],
+      });
+      await provider.waitForTransaction(txH, { retries: 400, retryInterval: 3000 });
+      setSwapResult(receiptToResult(await provider.getTransactionReceipt(txH), txH));
+      const usd = Number(quote.buyAmountInUsd ?? quote.sellAmountInUsd ?? 0);
+      setLedger(
+        recordPoints({
+          kind: "swap",
+          label: `Swap ${swapAmount} ${fromInfo.symbol} → ${toInfo.symbol}`,
+          usd,
+          points: swapPoints(usd),
+        })
+      );
+    } catch (e: any) {
+      setSwapResult(errorResult(e?.message ?? e?.toString?.() ?? String(e)));
+    } finally {
+      setSwapping(false);
+    }
+  };
+
+  // ─── bridge ────────────────────────────────────────────────────────────────
+
+  const handleBridgeOpen = (url: string, name: string) => {
+    try {
+      const link =
+        name === "Layerswap"
+          ? `${url}?sourceNetwork=ethereum&destinationNetwork=starknet_mainnet&destination=${connectedAddress ?? ""}`
+          : url;
+      window.open(link, "_blank", "noopener,noreferrer");
+      setBridgeResult({
+        status: "ok",
+        title: `Opening ${name}`,
+        note: "Complete the transfer on the provider's site, then shield the received funds here.",
+      });
+      setLedger(recordPoints({ kind: "bridge", label: `Bridge via ${name}`, points: POINTS_PER.bridge }));
+    } catch (e: any) {
+      setBridgeResult(errorResult(e?.message ?? String(e)));
     }
   };
 
@@ -1156,15 +1344,24 @@ export default function Page() {
 
         {/* Shield / unshield */}
         <section className={styles.section}>
-          <h2 className={styles.sectionTitle}>Shielded STRK</h2>
+          <h2 className={styles.sectionTitle}>Shielded balance</h2>
           <div className={styles.hint}>
-            Private balance in the pool: <b className={styles.mono}>{shielded} STRK</b> — shield
-            STRK before submitting a helper action.
+            Private balance in the pool: <b className={styles.mono}>{shielded} {symbolFor(shieldToken)}</b> — shield
+            tokens before funding or paying out a campaign.
           </div>
           <div className={styles.formRow}>
+            <select
+              className={styles.input}
+              value={shieldToken}
+              onChange={(e) => setShieldToken(e.target.value)}
+            >
+              {REWARD_TOKENS.map((t) => (
+                <option key={t.address} value={t.address}>{t.symbol} — {t.name}</option>
+              ))}
+            </select>
             <input
               className={styles.input}
-              placeholder="Amount (STRK)"
+              placeholder={`Amount (${symbolFor(shieldToken)})`}
               value={shieldAmount}
               onChange={(e) => setShieldAmount(e.target.value)}
             />
@@ -1187,6 +1384,108 @@ export default function Page() {
             <div className={styles.hint}>Connect a wallet to manage your shielded balance.</div>
           ) : null}
           {shieldResult ? <ResultCard r={shieldResult} /> : null}
+        </section>
+
+        {/* Swap (AVNU) */}
+        <section className={styles.section}>
+          <div className={styles.sectionHeading}>
+            <div>
+              <span className={styles.kicker}>Swap</span>
+              <h2 className={styles.sectionTitle}>Swap any token</h2>
+            </div>
+            <p>Best-price routing across all Starknet liquidity via AVNU. GameShield adds a small
+            0.25% integrator fee that helps keep this sprint alive.</p>
+          </div>
+          <div className={styles.formRow}>
+            <select
+              className={styles.input}
+              value={swapFromToken}
+              onChange={(e) => setSwapFromToken(e.target.value)}
+            >
+              {REWARD_TOKENS.map((t) => (
+                <option key={t.address} value={t.address}>{t.symbol}</option>
+              ))}
+            </select>
+            <span className={styles.hint}>→</span>
+            <select
+              className={styles.input}
+              value={swapToToken}
+              onChange={(e) => setSwapToToken(e.target.value)}
+            >
+              {REWARD_TOKENS.map((t) => (
+                <option key={t.address} value={t.address}>{t.symbol}</option>
+              ))}
+            </select>
+            <input
+              className={styles.input}
+              placeholder="Amount to sell"
+              value={swapAmount}
+              onChange={(e) => setSwapAmount(e.target.value)}
+            />
+            <select
+              className={styles.input}
+              value={String(swapSlippage)}
+              onChange={(e) => setSwapSlippage(Number(e.target.value))}
+            >
+              <option value="0.005">0.5% slippage</option>
+              <option value="0.01">1% slippage</option>
+              <option value="0.03">3% slippage</option>
+            </select>
+            <button
+              className={`${styles.btn} ${styles.btnSmall}`}
+              disabled={!isConnected || !isMainnet || swapping}
+              onClick={handleSwap}
+            >
+              {swapping ? "…" : "Swap"}
+            </button>
+          </div>
+          <div className={styles.hint}>
+            <b className={styles.mono}>{constants.AVNU_FEE_BPS} bps</b> integrator fee goes to
+            GameShield on every swap. Topping up swap tokens is a bridge away — see below.
+          </div>
+          {swapResult ? <ResultCard r={swapResult} /> : null}
+        </section>
+
+        {/* Bridge */}
+        <section className={styles.section}>
+          <div className={styles.sectionHeading}>
+            <div>
+              <span className={styles.kicker}>Bridge</span>
+              <h2 className={styles.sectionTitle}>Fund your wallet from anywhere</h2>
+            </div>
+            <p>Move funds onto Starknet with the most popular bridges. Pick a provider — the page
+            opens with your wallet address pre-filled where supported.</p>
+          </div>
+          <div className={styles.formRow}>
+            {constants.BRIDGE_PROVIDERS.map((p) => (
+              <button
+                key={p.id}
+                className={`${styles.btn} ${styles.btnSmall}`}
+                onClick={() => handleBridgeOpen(p.url, p.name)}
+                title={p.note}
+              >
+                {p.name}
+              </button>
+            ))}
+          </div>
+          <div className={styles.hint}>
+            {constants.BRIDGE_PROVIDERS.map((p) => `${p.name}: ${p.fee}`).join(" · ")} ·
+            StarkGate is the official bridge with no fees.
+          </div>
+          {bridgeResult ? <ResultCard r={bridgeResult} /> : null}
+        </section>
+
+        {/* Rating */}
+        <section className={styles.section}>
+          <div className={styles.sectionHeading}>
+            <div>
+              <span className={styles.kicker}>Rating</span>
+              <h2 className={styles.sectionTitle}>Your GameShield points</h2>
+            </div>
+            <p>Earn points for swaps (volume + count), campaigns, payouts and streaks. Higher
+            ratings unlock better visibility on the gaming bounty board.</p>
+          </div>
+          <RatingPanel ledger={ledger} />
         </section>
 
         {!hasContracts ? (
@@ -1212,7 +1511,14 @@ export default function Page() {
                 </label>
                 <label className={styles.field}>
                   <span>Reward</span>
-                  <div className={styles.inputUnit}><input className={styles.input} inputMode="decimal" value={rewardStrk} onChange={(e) => setRewardStrk(e.target.value)} /><b>STRK</b></div>
+                  <div className={styles.formRow}>
+                    <input className={styles.input} inputMode="decimal" value={rewardStrk} onChange={(e) => setRewardStrk(e.target.value)} />
+                    <select className={styles.input} value={campaignToken} onChange={(e) => setCampaignToken(e.target.value)}>
+                      {REWARD_TOKENS.map((t) => (
+                        <option key={t.address} value={t.address}>{t.symbol}</option>
+                      ))}
+                    </select>
+                  </div>
                 </label>
                 <label className={styles.field}>
                   <span>Ends at · your local time</span>
@@ -1294,7 +1600,7 @@ export default function Page() {
                     <div className={styles.campaignBody}>
                       <div className={styles.campaignMeta}>
                         <span>Reward</span>
-                        <b>{fmtStrk(c.rewardAmount)} STRK</b>
+                        <b>{formatTokenAmount(c.rewardAmount, tokenByAddress(c.token).decimals)} {symbolFor(c.token)}</b>
                       </div>
                       <div className={styles.campaignMeta}>
                         <span>Deadline</span>

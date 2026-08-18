@@ -11,6 +11,7 @@ pub enum CampaignStatus {
 #[derive(Copy, Drop, Serde, starknet::Store)]
 pub struct Campaign {
     pub organizer: ContractAddress,
+    pub token: ContractAddress,
     pub reward_amount: u128,
     pub deadline: u64,
     pub criteria_hash: felt252,
@@ -22,7 +23,11 @@ pub struct Campaign {
 #[starknet::interface]
 pub trait ICampaignRegistry<T> {
     fn create_campaign(
-        ref self: T, reward_amount: u128, deadline: u64, criteria_hash: felt252,
+        ref self: T,
+        reward_amount: u128,
+        deadline: u64,
+        criteria_hash: felt252,
+        token: ContractAddress,
     ) -> u64;
     fn complete_campaign(ref self: T, campaign_id: u64, winner_commitment: felt252);
     fn cancel_campaign(ref self: T, campaign_id: u64);
@@ -30,7 +35,11 @@ pub trait ICampaignRegistry<T> {
     fn get_campaign(self: @T, campaign_id: u64) -> Campaign;
     fn get_campaign_count(self: @T) -> u64;
     fn is_payout_valid(
-        self: @T, campaign_id: u64, winner_commitment: felt252, amount: u128,
+        self: @T,
+        campaign_id: u64,
+        winner_commitment: felt252,
+        amount: u128,
+        token: ContractAddress,
     ) -> bool;
     fn mark_paid(ref self: T, campaign_id: u64);
 }
@@ -38,6 +47,7 @@ pub trait ICampaignRegistry<T> {
 mod errors {
     pub const ZERO_REWARD: felt252 = 'ZERO_REWARD';
     pub const ZERO_DEADLINE: felt252 = 'ZERO_DEADLINE';
+    pub const ZERO_TOKEN: felt252 = 'ZERO_TOKEN';
     pub const NOT_FOUND: felt252 = 'NOT_FOUND';
     pub const NOT_ORGANIZER: felt252 = 'NOT_ORGANIZER';
     pub const NOT_HELPER: felt252 = 'NOT_HELPER';
@@ -80,6 +90,7 @@ pub mod CampaignRegistry {
         #[key]
         campaign_id: u64,
         organizer: ContractAddress,
+        token: ContractAddress,
         reward_amount: u128,
         deadline: u64,
         criteria_hash: felt252,
@@ -116,9 +127,11 @@ pub mod CampaignRegistry {
             reward_amount: u128,
             deadline: u64,
             criteria_hash: felt252,
+            token: ContractAddress,
         ) -> u64 {
             assert(reward_amount != 0, errors::ZERO_REWARD);
             assert(deadline != 0, errors::ZERO_DEADLINE);
+            assert(token.is_non_zero(), errors::ZERO_TOKEN);
 
             let campaign_id = self.campaign_count.read() + 1;
             self
@@ -127,6 +140,7 @@ pub mod CampaignRegistry {
                     campaign_id,
                     Campaign {
                         organizer: get_caller_address(),
+                        token,
                         reward_amount,
                         deadline,
                         criteria_hash,
@@ -142,6 +156,7 @@ pub mod CampaignRegistry {
                         CampaignCreated {
                             campaign_id,
                             organizer: get_caller_address(),
+                            token,
                             reward_amount,
                             deadline,
                             criteria_hash,
@@ -191,13 +206,18 @@ pub mod CampaignRegistry {
         }
 
         fn is_payout_valid(
-            self: @ContractState, campaign_id: u64, winner_commitment: felt252, amount: u128,
+            self: @ContractState,
+            campaign_id: u64,
+            winner_commitment: felt252,
+            amount: u128,
+            token: ContractAddress,
         ) -> bool {
             let campaign = self.campaigns.read(campaign_id);
             campaign.status == CampaignStatus::Completed
                 && !campaign.paid
                 && campaign.winner_commitment == winner_commitment
                 && campaign.reward_amount == amount
+                && campaign.token == token
         }
 
         fn mark_paid(ref self: ContractState, campaign_id: u64) {

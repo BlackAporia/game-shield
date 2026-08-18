@@ -146,7 +146,7 @@ pub mod PayoutHelper {
                         contract_address: self.registry.read()
                     };
                     assert(
-                        registry.is_payout_valid(campaign_id, commitment, amount),
+                        registry.is_payout_valid(campaign_id, commitment, amount, token),
                         errors::PAYOUT_INVALID,
                     );
 

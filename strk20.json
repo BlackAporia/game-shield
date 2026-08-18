@@ -1,9 +1,6 @@
 {
   "transactions": [],
-  "contracts": [
-    "0x03ce58babb9bc3651131657c273aae00cca554ffdccb13dba8b2d06ce60d61d5",
-    "0x034525253fd76049c7472059b522cdb51bc1963d35c30eee6deb20f6b4259256"
-  ],
+  "contracts": [],
   "demo_video": "",
   "demo_url": "https://gameshield-dapp.vercel.app"
 }

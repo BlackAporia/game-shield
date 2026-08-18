@@ -39,3 +39,50 @@ export const HelperAddress =
 
 // Frontend provider indices where the STRK20 privacy pool is available.
 export const Strk20Networks: Record<number, string> = { 0: "MAINNET", 2: "SEPOLIA" };
+
+// ─── GameShield Swap & Bridge ────────────────────────────────────────────────
+
+// GameShield earns a small integrator fee on every AVNU swap (0.25% = 25 bps).
+export const AVNU_FEE_BPS = 25;
+export const AVNU_FEE_RECIPIENT = "0x4c5a81396849724434ca58bdccdc68177ac6db5ef219823361795fa877c043a";
+export const AVNU_INTEGRATOR_NAME = "GameShield";
+
+export type BridgeProvider = {
+  id: string;
+  name: string;
+  url: string;
+  note: string;
+  fee: string;
+  chain?: "starknet" | "near";
+};
+
+export const BRIDGE_PROVIDERS: BridgeProvider[] = [
+  {
+    id: "starkgate",
+    name: "StarkGate (official)",
+    url: "https://starkgate.starknet.io",
+    note: "Official Starknet bridge — Ethereum L1 ⇄ L2, no fees.",
+    fee: "no fee",
+  },
+  {
+    id: "layerswap",
+    name: "Layerswap",
+    url: "https://www.layerswap.io/app",
+    note: "CEX ↔ Starknet and cross-chain transfers in minutes.",
+    fee: "affiliate",
+  },
+  {
+    id: "near-intents",
+    name: "NEAR Intents",
+    url: "https://intents.near.org",
+    note: "Cross-chain intent settlement powered by NEAR.",
+    fee: "intent fee",
+  },
+  {
+    id: "orbiter",
+    name: "Orbiter",
+    url: "https://www.orbiter.finance",
+    note: "Instant cross-rollup transfers.",
+    fee: "market fee",
+  },
+];

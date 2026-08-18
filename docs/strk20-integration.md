@@ -84,5 +84,43 @@ Requires the organizer's wallet with STRK on mainnet (real funds — user action
 
 ## 8. Next phases
 
-5. Run the 3 qualifying mainnet transactions (Fund + 2 Payouts through the helper) with the organizer wallet, then list the hashes in strk20.json
+5. Run the 3 qualifying mainnet transactions (deposit Fund + private-transfer Payout + unshield, all touching the pool) with the organizer wallet, then list the hashes in strk20.json
 6. Demo video (≤3 min) + verify the project row renders on strk20.starknet.io/hackathon
+
+## 7c. Status update (2026-08-18 — v2 multi-token rework)
+
+Root cause of all earlier `INVALID_REQUEST_PAYLOAD` failures found and proven on mainnet:
+Ready X does not implement the `amount: "OPEN"` literal. Probe results: deposit 1 wei,
+transfer 1 wei (with amount) and withdraw 1 wei to self were all **accepted**;
+`transfer OPEN` and `withdraw + transfer OPEN` were rejected with
+`INVALID_REQUEST_PAYLOAD`. Invoke support remains unproven.
+
+Therefore the v2 flow uses only the action variants every STRK20 wallet implements:
+
+```
+fund:   [{ type: "deposit", token, amount }]                    -> pool deposit
+payout: [{ type: "transfer", token, amount, recipient }]        -> pool private transfer
+```
+
+- Campaign registry v2 stores `token: ContractAddress` on-chain (create_campaign now takes
+  the token; `is_payout_valid` checks it). Class hashes: registry
+  `0x2f99b411abfa12ffc433bdb4b557dda5905b8fda37f6aa357a4e4ad92c530fc`, helper
+  `0x7d04f0a23b8e149041a98c0a8359927e1f0d72cea06f764e5c41ff2ca306d13`. The dapp accepts
+  both v1 and v2 hashes in Developer settings.
+- 10 supported reward tokens (STRK, ETH, USDC, USDT, DAI, WBTC, wstETH, xSTRK, LORDS,
+  EKUBO) with correct decimals, verified against the AVNU token list.
+- **Swap**: AVNU SDK (`@avnu/avnu-sdk` 4.2.0) — `getQuotes` with
+  `integratorFees: 25n` / `integratorFeeRecipient` / `integratorName: "GameShield"`, then
+  `executeSwap`. 0.25% integrator fee settles on-chain to the GameShield recipient.
+  AVNU also offers private swaps from shielded balances (`executePrivateSwap`) — planned
+  follow-up once a paymaster key is provisioned server-side.
+- **Bridge**: StarkGate (official, fee-free) / Layerswap (affiliate) / NEAR Intents /
+  Orbiter launchers with the wallet address pre-filled where supported.
+- **Rating**: local-first points ledger (volume + count + streaks) in `src/utils/points.ts`,
+  Bronze → Diamond levels rendered on the dapp.
+- **Qualifying transactions**: now any pool-touching tx qualifies (deposit / transfer /
+  withdraw), since the rules require the tx to "touch the STRK20 pool". The reworked
+  `verify-strk20-txs.mjs` scans receipts for pool events.
+- Wallet compatibility: Ready X and Xverse support the STRK20 Wallet API (deposit /
+  transfer / withdraw). Braavos and MetaMask do not — they can create/complete campaigns
+  but not perform private payouts; the dapp degrades gracefully.

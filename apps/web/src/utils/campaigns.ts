@@ -9,6 +9,7 @@ export type CampaignStatusName = (typeof CAMPAIGN_STATUS)[number];
 export type Campaign = {
   id: number;
   organizer: string;
+  token: string;
   rewardAmount: bigint;
   deadline: bigint;
   criteriaHash: string;
@@ -84,6 +85,7 @@ export async function getCampaign(
   return {
     id,
     organizer: validateAddr(raw.organizer as string),
+    token: validateAddr(raw.token as string),
     rewardAmount: num.toBigInt(raw.reward_amount),
     deadline: num.toBigInt(raw.deadline),
     criteriaHash: num.toHex(raw.criteria_hash as string),
