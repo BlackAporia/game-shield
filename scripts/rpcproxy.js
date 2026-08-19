@@ -27,16 +27,22 @@ function rewrite(v, key) {
   return v;
 }
 
+function fixBody(body) {
+  let payload = body;
+  try {
+    payload = JSON.stringify(rewrite(JSON.parse(body)));
+  } catch {
+    /* pass through non-JSON bodies untouched */
+  }
+  // blanket fallback: any "pending" string left in the request becomes "latest"
+  return payload.replace(/"pending"/g, '"latest"');
+}
+
 const server = http.createServer((req, res) => {
   let body = "";
   req.on("data", (c) => (body += c));
   req.on("end", () => {
-    let payload = body;
-    try {
-      payload = JSON.stringify(rewrite(JSON.parse(body)));
-    } catch {
-      /* pass through non-JSON bodies untouched */
-    }
+    const payload = fixBody(body);
     const u = new URL(UPSTREAM);
     const r = https.request(
       {

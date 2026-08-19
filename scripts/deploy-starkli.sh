@@ -89,7 +89,16 @@ starkli_ok() { # starkli_ok <cmd...> ; prints stdout last line, exits on failure
 
 declare_class() { # declare_class <sierra> <casm> ; prints class hash
   local sierra=$1 casm=$2 out rc
-  out=$(starkli declare "$sierra" --casm-file "$casm" --rpc "$RPC_URL" 2>"$ERR_FILE")
+  # Starknet >=0.14.1 uses BLAKE2s for compiled class hashes, but starkli 0.4
+  # computes Poseidon hashes. Compute the BLAKE2s hash ourselves and hand it
+  # to starkli via --casm-hash.
+  local blake
+  blake=$(node scripts/blake-casm-hash.mjs "$casm" 2>/dev/null) || {
+    echo "ERROR: failed to compute BLAKE2s CASM hash with starknet-js (run 'npm install' in apps/web first)." >&2
+    exit 1
+  }
+  echo "    compiled_class_hash (BLAKE2s): $blake"
+  out=$(starkli declare "$sierra" --casm-hash "$blake" --rpc "$RPC_URL" 2>"$ERR_FILE")
   rc=$?
   if [[ $rc -ne 0 ]]; then
     if grep -qi "already declared" "$ERR_FILE"; then
