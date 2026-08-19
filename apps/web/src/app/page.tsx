@@ -872,7 +872,7 @@ export default function Page() {
 
       setDeployState("Linking helper to registry…");
       const link = await myWalletAccount.execute([
-        { contractAddress: registryAddress, entrypoint: "set_helper", calldata: [helperAddress] },
+        { contractAddress: registryAddress, entrypoint: "propose_helper", calldata: [helperAddress] },
       ] as any);
       await wait(link.transaction_hash);
 
@@ -901,7 +901,16 @@ export default function Page() {
         note: "Verified on-chain: both classes declared and deployed at the addresses above. Copy them into .env (NEXT_PUBLIC_REGISTRY_ADDRESS / NEXT_PUBLIC_HELPER_ADDRESS) so all users see the same contracts.",
       });
     } catch (e: any) {
-      setDeployResult(errorResult(e?.message ?? e?.toString?.() ?? String(e)));
+      const raw = e?.message ?? e?.toString?.() ?? String(e);
+      const m = raw.toLowerCase();
+      const isUserRejection = m.includes("user rejected") || m.includes("user abort") || m.includes("user canceled") || m.includes("user cancelled") || m.includes("user denied");
+      const isFeeReview = m.includes("max fee") || m.includes("fee too low") || m.includes("insufficient max fee") || m.includes("network fee") || m.includes("estimate_fee");
+      const note = isUserRejection
+        ? "Transaction was rejected in the wallet. Click Deploy contracts again to continue."
+        : isFeeReview
+          ? "Ready X fee-review for an unknown contract set a high max-fee. Click Deploy contracts again — the fee review usually settles on the second attempt."
+          : undefined;
+      setDeployResult({ status: "error", title: "Action failed", note, rows: [{ label: "Error", value: raw }] });
     } finally {
       setDeployState("");
     }
@@ -1285,9 +1294,17 @@ export default function Page() {
             or paste already-deployed addresses.
           </div>
           <div className={styles.hint}>
-            GameShield contracts are at v4. If you deployed an older version, click Deploy
-            contracts again to redeploy with the latest version (deadline enforcement +
-            two-step helper handover).
+            GameShield contracts are at v5 (multi-token, on-chain title, deadline enforcement,
+            two-step helper handover). If you deployed an older version, click Deploy contracts
+            again to redeploy with the latest version.
+          </div>
+          <div className={styles.hint}>
+            <b>Ready X fee-review note:</b> the first deploy triggers 3 wallet popups
+            (declare registry, deploy registry, declare helper, deploy helper, link helper).
+            Ready X may show a large network-fee margin on the first popup because the
+            CampaignRegistry / PayoutHelper contracts are new to it. If the Confirm button
+            looks stuck or shows a high fee, cancel the popup, click Deploy contracts again —
+            the fee review usually settles on the second attempt.
           </div>
           <div className={styles.formRow}>
             <button
