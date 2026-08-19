@@ -2,17 +2,14 @@
 # deploy-starkli.sh — deploy GameShield v5 contracts using starkli CLI
 # (bypasses the Ready X fee-review issue with unknown custom contracts).
 #
-# Prerequisites:
-#   - starkli 0.3+ (https://book.starkli.rs/installation)
-#   - An account config + signer configured (account JSON + keystore, or
-#     STARKNET_PRIVATE_KEY). See: https://book.starkli.rs/signers
-#   - scarb 2.18+ to build contracts.
+# Auto-detects the machine's existing starkli config:
+#   ~/.starkli-gs/account.json  +  ~/.starkli-gs/keystore.json
+# (or use STARKNET_ACCOUNT / STARKNET_KEYSTORE / STARKNET_PRIVATE_KEY).
 #
 # Usage:
 #   OWNER_ADDRESS=<your address> bash scripts/deploy-starkli.sh
 #
-#   If OWNER_ADDRESS is omitted, it is derived from your starkli account
-#   config (STARKNET_ACCOUNT) via `starkli account fetch`.
+#   If OWNER_ADDRESS is omitted, it is read from the account config file.
 #
 # Output:
 #   Writes scripts/deploy-output.json with the deployed addresses and
@@ -29,54 +26,101 @@ cd "$(dirname "$0")/.."
 RPC_URL="${RPC_URL:-https://rpc.starknet.lava.build}"
 POOL_ADDRESS="${POOL_ADDRESS:-0x040337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a}"
 
-# --- 0. Resolve owner address ---
+# --- 0. starkli account / signer config -------------------------------------
+if [[ -z "${STARKNET_ACCOUNT:-}" && -f "$HOME/.starkli-gs/account.json" ]]; then
+  export STARKNET_ACCOUNT="$HOME/.starkli-gs/account.json"
+  echo "==> Using starkli account: $STARKNET_ACCOUNT"
+fi
+if [[ -z "${STARKNET_KEYSTORE:-}" && -f "$HOME/.starkli-gs/keystore.json" ]]; then
+  export STARKNET_KEYSTORE="$HOME/.starkli-gs/keystore.json"
+  echo "==> Using starkli keystore: $STARKNET_KEYSTORE"
+fi
+if [[ -z "${STARKNET_ACCOUNT:-}" ]]; then
+  echo "ERROR: starkli account not configured." >&2
+  echo "       Set STARKNET_ACCOUNT=<path to account.json>, or create one:" >&2
+  echo "         starkli account oz init ~/.starkli-gs/account.json" >&2
+  exit 1
+fi
+if [[ -z "${STARKNET_KEYSTORE:-}" && -z "${STARKNET_PRIVATE_KEY:-}" ]]; then
+  echo "ERROR: starkli signer not configured. Set STARKNET_KEYSTORE or STARKNET_PRIVATE_KEY." >&2
+  exit 1
+fi
+if [[ -z "${STARKNET_KEYSTORE_PASSWORD:-}" && -f "${STARKNET_KEYSTORE:-}" ]]; then
+  read -r -s -p "Enter starkli keystore password: " STARKNET_KEYSTORE_PASSWORD
+  echo
+  export STARKNET_KEYSTORE_PASSWORD
+fi
+
+# --- Owner address -----------------------------------------------------------
 if [[ -n "${OWNER_ADDRESS:-}" ]]; then
   OWNER="$OWNER_ADDRESS"
-elif [[ -n "${STARKNET_ACCOUNT:-}" ]]; then
-  echo "==> OWNER_ADDRESS not set — fetching it from starkli account config"
-  TMP_OUT="${TMPDIR:-/tmp}/gameshield-account.json"
-  starkli account fetch --output "$TMP_OUT" --account "$STARKNET_ACCOUNT" --rpc "$RPC_URL" >/dev/null 2>&1
-  OWNER=$(python3 -c "import json; print(json.load(open('$TMP_OUT'))['deployment']['address'])")
+elif python3 -c "import json,sys; json.load(open('$STARKNET_ACCOUNT'))['deployment']['address']" 2>/dev/null; then
+  OWNER=$(python3 -c "import json; print(json.load(open('$STARKNET_ACCOUNT'))['deployment']['address'])")
 else
-  echo "ERROR: set OWNER_ADDRESS=<your Starknet address> (or configure STARKNET_ACCOUNT)." >&2
+  echo "ERROR: OWNER_ADDRESS not set and could not read it from $STARKNET_ACCOUNT" >&2
   exit 1
 fi
 echo "    owner: $OWNER"
 
-# --- 1. Build ---
+# --- Helpers -----------------------------------------------------------------
+ERR_FILE="$(mktemp /tmp/gs-deploy.XXXXXX.err)"
+trap 'rm -f "$ERR_FILE"' EXIT
+
+starkli_ok() { # starkli_ok <cmd...> ; prints stdout last line, exits on failure
+  local out rc
+  out=$(starkli "$@" 2>"$ERR_FILE")
+  rc=$?
+  if [[ $rc -ne 0 ]]; then
+    echo "ERROR: starkli $* failed (exit $rc):" >&2
+    sed 's/^/    /' "$ERR_FILE" >&2
+    exit 1
+  fi
+  printf '%s\n' "$out" | tail -1
+}
+
+declare_class() { # declare_class <sierra> <casm> ; prints class hash
+  local sierra=$1 casm=$2 out rc
+  out=$(starkli declare "$sierra" --casm-file "$casm" --rpc "$RPC_URL" 2>"$ERR_FILE")
+  rc=$?
+  if [[ $rc -ne 0 ]]; then
+    if grep -qi "already declared" "$ERR_FILE"; then
+      starkli class-hash "$sierra" 2>/dev/null | tail -1
+      return 0
+    fi
+    echo "ERROR: starkli declare failed (exit $rc):" >&2
+    sed 's/^/    /' "$ERR_FILE" >&2
+    exit 1
+  fi
+  printf '%s\n' "$out" | tail -1
+}
+
+# --- 1. Build -----------------------------------------------------------------
 echo "==> Building contracts with scarb"
 (cd contracts && scarb build)
 
-# --- 2. Declare registry ---
+# --- 2. Declare + deploy registry --------------------------------------------
 echo "==> Declaring CampaignRegistry"
-REG_CLASS_HASH=$(starkli declare \
+REG_CLASS_HASH=$(declare_class \
   contracts/target/dev/gameshield_CampaignRegistry.contract_class.json \
-  --rpc "$RPC_URL" 2>/dev/null | tail -1)
+  contracts/target/dev/gameshield_CampaignRegistry.compiled_contract_class.json)
 echo "    class_hash: $REG_CLASS_HASH"
 
-# --- 3. Deploy registry ---
-echo "==> Deploying CampaignRegistry"
-REG_ADDRESS=$(starkli deploy "$REG_CLASS_HASH" \
-  --rpc "$RPC_URL" \
-  "$OWNER" 2>/dev/null | tail -1)
+echo "==> Deploying CampaignRegistry (owner = $OWNER)"
+REG_ADDRESS=$(starkli_ok deploy "$REG_CLASS_HASH" --rpc "$RPC_URL" "$OWNER")
 echo "    contract_address: $REG_ADDRESS"
 
-# --- 4. Declare helper ---
+# --- 3. Declare + deploy helper ----------------------------------------------
 echo "==> Declaring PayoutHelper"
-HELP_CLASS_HASH=$(starkli declare \
+HELP_CLASS_HASH=$(declare_class \
   contracts/target/dev/gameshield_PayoutHelper.contract_class.json \
-  --rpc "$RPC_URL" 2>/dev/null | tail -1)
+  contracts/target/dev/gameshield_PayoutHelper.compiled_contract_class.json)
 echo "    class_hash: $HELP_CLASS_HASH"
 
-# --- 5. Deploy helper ---
-echo "==> Deploying PayoutHelper"
-HELP_ADDRESS=$(starkli deploy "$HELP_CLASS_HASH" \
-  --rpc "$RPC_URL" \
-  "$POOL_ADDRESS" \
-  "$REG_ADDRESS" 2>/dev/null | tail -1)
+echo "==> Deploying PayoutHelper (pool + registry)"
+HELP_ADDRESS=$(starkli_ok deploy "$HELP_CLASS_HASH" --rpc "$RPC_URL" "$POOL_ADDRESS" "$REG_ADDRESS")
 echo "    contract_address: $HELP_ADDRESS"
 
-# --- 6. Output ---
+# --- 4. Output -----------------------------------------------------------------
 cat > scripts/deploy-output.json <<EOF
 {
   "registry": {
