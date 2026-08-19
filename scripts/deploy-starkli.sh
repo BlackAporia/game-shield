@@ -17,13 +17,22 @@
 #
 # Environment (optional overrides):
 #   POOL_ADDRESS - STRK20 pool (default: mainnet STRK pool)
-#   RPC_URL      - mainnet RPC (default: https://rpc.starknet.lava.build)
+#   RPC_URL      - mainnet RPC. Default: the local proxy scripts/rpcproxy.js
+#                  (if running on 127.0.0.1:9546), else rpc.starknet.lava.build
 
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-RPC_URL="${RPC_URL:-https://rpc.starknet.lava.build}"
+if [[ -z "${RPC_URL:-}" ]]; then
+  if curl -s -m 2 http://127.0.0.1:9546 >/dev/null 2>&1; then
+    RPC_URL="http://127.0.0.1:9546"
+    echo "==> Using local RPC proxy (pending -> latest): $RPC_URL"
+    echo "    (start it with: node scripts/rpcproxy.js)"
+  else
+    RPC_URL="https://rpc.starknet.lava.build"
+  fi
+fi
 POOL_ADDRESS="${POOL_ADDRESS:-0x040337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a}"
 
 # --- 0. starkli account / signer config -------------------------------------
