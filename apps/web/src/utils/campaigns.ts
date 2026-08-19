@@ -1,5 +1,7 @@
 import { Abi, Contract, hash, num, ProviderInterface } from "starknet";
 import registryAbi from "../contracts/CampaignRegistry.json";
+import registryV1Abi from "../contracts/CampaignRegistryV1.json";
+import { addrSTRK } from "./constants";
 
 // On-chain status of a campaign, matching CampaignStatus in campaign_registry.cairo.
 export const CAMPAIGN_STATUS = ["Active", "Completed", "Cancelled"] as const;
@@ -18,8 +20,49 @@ export type Campaign = {
   title: string;
 };
 
-export function registryContract(provider: ProviderInterface, address: string): Contract {
-  return new Contract({ abi: registryAbi as Abi, address, providerOrAccount: provider });
+// Class hash of the legacy v1 CampaignRegistry (already declared on Mainnet).
+// v1 has no on-chain `title`/`token` and its create_campaign takes 3 arguments.
+export const CAMPAIGN_REGISTRY_V1 = "0x43f1247fc09a89c13d776d13e8b6c7814d93193b64c0615e10238392edf038";
+
+const classHashCache = new Map<string, string>();
+
+export async function registryClassHash(
+  provider: ProviderInterface,
+  address: string
+): Promise<string> {
+  const key = validateAddr(address);
+  const cached = classHashCache.get(key);
+  if (cached) return cached;
+  const classHash = await provider.getClassHashAt(address);
+  classHashCache.set(key, classHash);
+  return classHash;
+}
+
+export async function isRegistryV1(
+  provider: ProviderInterface,
+  address: string
+): Promise<boolean> {
+  try {
+    const classHash = await registryClassHash(provider, address);
+    return num.toHex(num.toBigInt(classHash)) === num.toHex(num.toBigInt(CAMPAIGN_REGISTRY_V1));
+  } catch {
+    return false;
+  }
+}
+
+async function registryAbiFor(
+  provider: ProviderInterface,
+  address: string
+): Promise<Abi> {
+  return (await isRegistryV1(provider, address) ? registryV1Abi : registryAbi) as Abi;
+}
+
+export async function registryContract(
+  provider: ProviderInterface,
+  address: string
+): Promise<Contract> {
+  const abi = await registryAbiFor(provider, address);
+  return new Contract({ abi, address, providerOrAccount: provider });
 }
 
 export function statusName(status: number): CampaignStatusName {
@@ -76,7 +119,7 @@ export async function getCampaignCount(
   provider: ProviderInterface,
   registry: string
 ): Promise<number> {
-  const c = registryContract(provider, registry);
+  const c = await registryContract(provider, registry);
   const count = await c.get_campaign_count();
   return Number(count);
 }
@@ -86,18 +129,19 @@ export async function getCampaign(
   registry: string,
   id: number
 ): Promise<Campaign> {
-  const c = registryContract(provider, registry);
+  const c = await registryContract(provider, registry);
   const raw: any = await c.get_campaign(id);
   return {
     id,
     organizer: validateAddr(raw.organizer as string),
-    token: validateAddr(raw.token as string),
+    // v1 contracts store no token; the STRK20 pool flow is STRK-only there.
+    token: raw.token ? validateAddr(raw.token as string) : addrSTRK,
     rewardAmount: num.toBigInt(raw.reward_amount),
     deadline: num.toBigInt(raw.deadline),
     criteriaHash: num.toHex(raw.criteria_hash as string),
     status: parseCampaignStatus(raw.status),
     winnerCommitment: num.toHex(raw.winner_commitment as string),
     paid: parseCairoBool(raw.paid),
-    title: num.toHex(raw.title as string),
+    title: raw.title ? num.toHex(raw.title as string) : "0x0",
   };
 }

@@ -32,9 +32,11 @@ export const myFrontendProviders: ProviderInterface[] = [
 //   NEXT_PUBLIC_REGISTRY_ADDRESS
 //   NEXT_PUBLIC_HELPER_ADDRESS
 export const RegistryAddress =
-  process.env.NEXT_PUBLIC_REGISTRY_ADDRESS ?? "0x0";
+  process.env.NEXT_PUBLIC_REGISTRY_ADDRESS ??
+  "0x02d74df1009ea1cd63ddf676a1d68abd6c2aa0da9e44aa9199006cfda5f9ec3e";
 export const HelperAddress =
-  process.env.NEXT_PUBLIC_HELPER_ADDRESS ?? "0x0";
+  process.env.NEXT_PUBLIC_HELPER_ADDRESS ??
+  "0x01108f56778d7c137deb6c7d0f602311b6a867e649fdfa460d93eb36d7cc27a9";
 
 // Frontend provider indices where the STRK20 privacy pool is available.
 export const Strk20Networks: Record<number, string> = { 0: "MAINNET", 1: "SEPOLIA" };
