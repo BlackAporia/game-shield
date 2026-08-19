@@ -428,6 +428,17 @@ export default function Page() {
     return undefined;
   };
 
+  // The wallet can hang (its RPC stalls) without rejecting the request, leaving
+  // the UI silent. Race every wallet call against a timeout so the user always
+  // gets a reaction with guidance.
+  const withWalletTimeout = <T,>(p: Promise<T>, ms: number, what: string): Promise<T> =>
+    Promise.race([
+      p,
+      new Promise<T>((_, reject) =>
+        setTimeout(() => reject(new Error(`${what} — the wallet did not respond in time. If the transaction appears in the wallet/explorer, it is on-chain — refresh and continue.`)), ms)
+      ),
+    ]);
+
   async function submitPrivate(
     actions: WALLET_API.STRK20_ACTION[],
     id: number,
@@ -463,7 +474,11 @@ export default function Page() {
         // still validates and proves the same actions itself.
         console.warn("STRK20 preflight skipped:", preflightErr?.message ?? preflightErr);
       }
-      const r = await myWalletAccount.strk20InvokeTransaction(actions);
+      const r = await withWalletTimeout(
+        myWalletAccount.strk20InvokeTransaction(actions),
+        60_000,
+        "STRK20 submission"
+      );
       txH = r.transaction_hash;
     } catch (e: any) {
       const message = e?.message ?? e?.toString?.() ?? String(e);
@@ -544,7 +559,11 @@ export default function Page() {
     }
     let txH: string;
     try {
-      const r = await myWalletAccount.execute(calls as any);
+      const r = await withWalletTimeout(
+        myWalletAccount.execute(calls as any),
+        45_000,
+        "Wallet submission"
+      );
       txH = r.transaction_hash;
     } catch (e: any) {
       setResult(id, errorResult(e?.message ?? e?.toString?.() ?? String(e)));
