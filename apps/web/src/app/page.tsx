@@ -1283,12 +1283,20 @@ export default function Page() {
 
     const submitWinner = (mode: "complete" | "payout") => {
       try {
-        const addr = validateAndParseAddress(winner);
+        let text = winner.trim();
+        if (!text) throw new Error("Enter a Starknet address (0x…).");
+        // Pasted addresses often carry a trailing newline/space; extract the
+        // first well-formed hex token instead of rejecting the whole input.
+        const match = text.match(/0x[0-9a-fA-F]{40,64}/);
+        if (match) text = match[0];
+        const addr = validateAndParseAddress(text);
         setWinnerErr("");
         if (mode === "complete") handleComplete(c, addr);
         else handlePayout(c, addr);
-      } catch {
-        setWinnerErr("Enter a valid Starknet address (0x…).");
+      } catch (e: any) {
+        setWinnerErr(e?.message && !String(e?.message).includes("Invalid Starknet address")
+          ? String(e.message)
+          : "Enter a valid Starknet address (0x…).");
       }
     };
 
@@ -1305,6 +1313,20 @@ export default function Page() {
           disabled={busy[c.id] !== undefined}
         />
         <div className={styles.winnerBtns}>
+          {isOrganizer && connectedAddress && (
+            <button
+              type="button"
+              className={`${styles.btn} ${styles.btnSmall}`}
+              disabled={busy[c.id] !== undefined}
+              onClick={() => {
+                setWinner(validateAddr(connectedAddress));
+                setWinnerErr("");
+              }}
+              title="Fill the winner field with your connected address"
+            >
+              Use my address
+            </button>
+          )}
           {isActive && isOrganizer && (
             <button
               className={`${styles.btn} ${styles.btnSmall}`}
