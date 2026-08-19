@@ -834,41 +834,39 @@ export default function Page() {
     try {
       setDeployResult(null);
 
-      setDeployState("Declaring CampaignRegistry…");
-      const d1 = await myWalletAccount.declare({
+      // Use declareAndDeploy for both contracts: 2 wallet popups total
+      // (declare + deploy combined). Ready X's fee-review is friendlier when
+      // each popup represents a single on-chain tx instead of two.
+      setDeployState("Declaring + deploying CampaignRegistry…");
+      const r1: any = await (myWalletAccount as any).declareAndDeploy({
         contract: cleanClass(CampaignRegistrySierra),
         casm: CampaignRegistryCasm,
-      } as any);
-      await wait(d1.transaction_hash);
-      const registryClassHash = d1.class_hash;
-      await verifyDeclared(registryClassHash, "CampaignRegistry");
-
-      setDeployState("Deploying CampaignRegistry…");
-      const dep1 = await myWalletAccount.deploy({
-        classHash: registryClassHash,
         constructorCalldata: [validateAddr(connectedAddress)],
-      } as any);
-      const registryAddress = pickAddr(dep1.contract_address);
-      await wait(dep1.transaction_hash);
-      await verifyDeployed(registryAddress, registryClassHash, "CampaignRegistry");
+      });
+      const r1ClassHash = pickAddr(r1.class_hash);
+      const r1Address = pickAddr(r1.contract_address);
+      const r1TxHash = r1.transaction_hash ?? r1.declare_transaction_hash;
+      await wait(r1TxHash);
+      await verifyDeclared(r1ClassHash, "CampaignRegistry");
+      await verifyDeployed(r1Address, r1ClassHash, "CampaignRegistry");
 
-      setDeployState("Declaring PayoutHelper…");
-      const d2 = await myWalletAccount.declare({
+      setDeployState("Declaring + deploying PayoutHelper…");
+      const r2: any = await (myWalletAccount as any).declareAndDeploy({
         contract: cleanClass(PayoutHelperSierra),
         casm: PayoutHelperCasm,
-      } as any);
-      await wait(d2.transaction_hash);
-      const helperClassHash = d2.class_hash;
-      await verifyDeclared(helperClassHash, "PayoutHelper");
+        constructorCalldata: [constants.PoolAddress, r1Address],
+      });
+      const r2ClassHash = pickAddr(r2.class_hash);
+      const r2Address = pickAddr(r2.contract_address);
+      const r2TxHash = r2.transaction_hash ?? r2.declare_transaction_hash;
+      await wait(r2TxHash);
+      await verifyDeclared(r2ClassHash, "PayoutHelper");
+      await verifyDeployed(r2Address, r2ClassHash, "PayoutHelper");
 
-      setDeployState("Deploying PayoutHelper…");
-      const dep2 = await myWalletAccount.deploy({
-        classHash: helperClassHash,
-        constructorCalldata: [constants.PoolAddress, registryAddress],
-      } as any);
-      const helperAddress = pickAddr(dep2.contract_address);
-      await wait(dep2.transaction_hash);
-      await verifyDeployed(helperAddress, helperClassHash, "PayoutHelper");
+      const registryAddress = r1Address;
+      const registryClassHash = r1ClassHash;
+      const helperAddress = r2Address;
+      const helperClassHash = r2ClassHash;
 
       setDeployState("Linking helper to registry…");
       const link = await myWalletAccount.execute([
