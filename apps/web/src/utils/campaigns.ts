@@ -15,6 +15,7 @@ export type Campaign = {
   status: number;
   winnerCommitment: string;
   paid: boolean;
+  title: string;
 };
 
 export function registryContract(provider: ProviderInterface, address: string): Contract {
@@ -97,5 +98,6 @@ export async function getCampaign(
     status: parseCampaignStatus(raw.status),
     winnerCommitment: num.toHex(raw.winner_commitment as string),
     paid: parseCairoBool(raw.paid),
+    title: num.toHex(raw.title as string),
   };
 }

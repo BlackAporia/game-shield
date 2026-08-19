@@ -17,6 +17,7 @@ const ALICE: felt252 = 'alice';
 const POOL: felt252 = 'pool';
 const CRITERIA: felt252 = 'criteria-v1';
 const TOKEN: felt252 = 'token';
+const TITLE: felt252 = 'Speedrun #1';
 
 fn addr(felt: felt252) -> ContractAddress {
     felt.try_into().unwrap()
@@ -71,7 +72,7 @@ fn mint(token: ContractAddress, account: ContractAddress, amount: u128) {
 fn create_campaign(registry: ContractAddress, reward: u128, deadline: u64) -> u64 {
     cheat_caller_for(registry, ORGANIZER);
     ICampaignRegistryDispatcher { contract_address: registry }
-        .create_campaign(reward, deadline, CRITERIA, addr(TOKEN))
+        .create_campaign(reward, deadline, CRITERIA, addr(TOKEN), TITLE)
 }
 
 fn create_campaign_token(
@@ -79,7 +80,7 @@ fn create_campaign_token(
 ) -> u64 {
     cheat_caller_for(registry, ORGANIZER);
     ICampaignRegistryDispatcher { contract_address: registry }
-        .create_campaign(reward, deadline, CRITERIA, token)
+        .create_campaign(reward, deadline, CRITERIA, token, TITLE)
 }
 
 fn complete_campaign(registry: ContractAddress, id: u64, commitment: felt252) {
@@ -105,6 +106,17 @@ fn create_campaign_sets_state() {
     assert!(campaign.organizer == addr(ORGANIZER), "organizer mismatch");
     assert!(campaign.reward_amount == 1000, "reward mismatch");
     assert!(campaign.status == CampaignStatus::Active, "status must be Active");
+    assert!(campaign.title == TITLE, "title stored");
+}
+
+#[test]
+#[should_panic(expected: ('EMPTY_TITLE',))]
+fn create_campaign_empty_title_rejected() {
+    let registry = deploy_registry();
+
+    cheat_caller_for(registry, ORGANIZER);
+    ICampaignRegistryDispatcher { contract_address: registry }
+        .create_campaign(1000, 100, CRITERIA, addr(TOKEN), 0);
 }
 
 #[test]
@@ -113,7 +125,7 @@ fn zero_reward_rejected() {
     let registry = deploy_registry();
     cheat_caller_for(registry, ORGANIZER);
     ICampaignRegistryDispatcher { contract_address: registry }
-        .create_campaign(0, 100, CRITERIA, addr(TOKEN));
+        .create_campaign(0, 100, CRITERIA, addr(TOKEN), TITLE);
 }
 
 #[test]
@@ -422,7 +434,7 @@ fn create_campaign_past_deadline_rejected() {
 
     cheat_caller_for(registry, ORGANIZER);
     ICampaignRegistryDispatcher { contract_address: registry }
-        .create_campaign(1000, 100, CRITERIA, addr(TOKEN));
+        .create_campaign(1000, 100, CRITERIA, addr(TOKEN), TITLE);
 
     stop_cheat_block_timestamp(registry);
 }

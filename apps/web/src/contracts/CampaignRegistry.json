@@ -71,6 +71,10 @@
       {
         "name": "paid",
         "type": "core::bool"
+      },
+      {
+        "name": "title",
+        "type": "core::felt252"
       }
     ]
   },
@@ -97,6 +101,10 @@
           {
             "name": "token",
             "type": "core::starknet::contract_address::ContractAddress"
+          },
+          {
+            "name": "title",
+            "type": "core::felt252"
           }
         ],
         "outputs": [
@@ -264,6 +272,11 @@
       },
       {
         "name": "criteria_hash",
+        "type": "core::felt252",
+        "kind": "data"
+      },
+      {
+        "name": "title",
         "type": "core::felt252",
         "kind": "data"
       }

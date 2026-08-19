@@ -18,6 +18,7 @@ pub struct Campaign {
     pub status: CampaignStatus,
     pub winner_commitment: felt252,
     pub paid: bool,
+    pub title: felt252,
 }
 
 #[starknet::interface]
@@ -28,6 +29,7 @@ pub trait ICampaignRegistry<T> {
         deadline: u64,
         criteria_hash: felt252,
         token: ContractAddress,
+        title: felt252,
     ) -> u64;
     fn complete_campaign(ref self: T, campaign_id: u64, winner_commitment: felt252);
     fn cancel_campaign(ref self: T, campaign_id: u64);
@@ -62,6 +64,7 @@ mod errors {
     pub const DEADLINE_PASSED: felt252 = 'DEADLINE_PASSED';
     pub const ZERO_HELPER: felt252 = 'ZERO_HELPER';
     pub const NOT_PENDING_HELPER: felt252 = 'NOT_PENDING_HELPER';
+    pub const EMPTY_TITLE: felt252 = 'EMPTY_TITLE';
 }
 
 #[starknet::contract]
@@ -103,6 +106,7 @@ pub mod CampaignRegistry {
         reward_amount: u128,
         deadline: u64,
         criteria_hash: felt252,
+        title: felt252,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -154,10 +158,12 @@ pub mod CampaignRegistry {
             deadline: u64,
             criteria_hash: felt252,
             token: ContractAddress,
+            title: felt252,
         ) -> u64 {
             assert(reward_amount != 0, errors::ZERO_REWARD);
             assert(deadline != 0, errors::ZERO_DEADLINE);
             assert(token.is_non_zero(), errors::ZERO_TOKEN);
+            assert(title.is_non_zero(), errors::EMPTY_TITLE);
             assert(get_block_timestamp() < deadline, errors::DEADLINE_PASSED);
 
             let campaign_id = self.campaign_count.read() + 1;
@@ -174,6 +180,7 @@ pub mod CampaignRegistry {
                         status: CampaignStatus::Active,
                         winner_commitment: 0,
                         paid: false,
+                        title,
                     },
                 );
             self.campaign_count.write(campaign_id);
@@ -187,6 +194,7 @@ pub mod CampaignRegistry {
                             reward_amount,
                             deadline,
                             criteria_hash,
+                            title,
                         },
                     ),
                 );
