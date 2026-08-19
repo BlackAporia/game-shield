@@ -390,6 +390,44 @@ export default function Page() {
     }
   };
 
+  // If the wallet reports a submission timeout, the STRK20 action may still have
+  // landed on-chain (the wallet submits, then the response times out). Poll the
+  // pool for events newer than `sinceBlock` and return the user's pool tx hash.
+  const poolTouchTxSince = async (
+    sinceBlock: number,
+    userAddress: string
+  ): Promise<string | undefined> => {
+    try {
+      let continuation: string | undefined;
+      for (let page = 0; page < 4; page++) {
+        const res = await provider.getEvents({
+          address: constants.PoolAddress,
+          from_block: { block_number: sinceBlock },
+          to_block: "latest",
+          chunk_size: 100,
+          ...(continuation ? { continuation_token: continuation } : {}),
+        });
+        for (const ev of res.events ?? []) {
+          if (!ev.transaction_hash) continue;
+          try {
+            const tx: any = await provider.getTransactionByHash(ev.transaction_hash);
+            const sender = tx?.sender_address ?? tx?.contract_address;
+            if (sender && num.toHex(sender) === num.toHex(userAddress)) {
+              return ev.transaction_hash;
+            }
+          } catch {
+            /* tx not retrievable yet */
+          }
+        }
+        if (!res.continuation_token) break;
+        continuation = res.continuation_token;
+      }
+    } catch {
+      /* pool verification unavailable */
+    }
+    return undefined;
+  };
+
   async function submitPrivate(
     actions: WALLET_API.STRK20_ACTION[],
     id: number,
@@ -409,7 +447,9 @@ export default function Page() {
       ? [{ label: "On-chain settlement", value: settlementAdvisory }]
       : [];
     let txH: string;
+    let sinceBlock: number | undefined;
     try {
+      sinceBlock = await provider.getBlockNumber().catch(() => undefined);
       setResult(id, {
         status: "pending",
         title: "Checking private transaction…",
@@ -427,6 +467,23 @@ export default function Page() {
       txH = r.transaction_hash;
     } catch (e: any) {
       const message = e?.message ?? e?.toString?.() ?? String(e);
+      if (sinceBlock !== undefined && connectedAddress) {
+        const landed = await poolTouchTxSince(sinceBlock, connectedAddress);
+        if (landed) {
+          txH = landed;
+          setResult(id, {
+            status: "ok",
+            title: "Action confirmed on-chain",
+            rows: [
+              { label: label, value: tokenSymbol ?? "STRK" },
+              ...advisoryRow,
+              { label: "Transaction", value: shortHex(txH), hash: txH },
+            ],
+            note: "The wallet timed out replying, but the STRK20 action was already confirmed on-chain.",
+          });
+          return txH;
+        }
+      }
       setResult(id, errorResult(`STRK20 preflight or submission failed: ${message}`));
       return undefined;
     }
@@ -446,6 +503,22 @@ export default function Page() {
       r.note = "Private STRK20 action confirmed. The reward moves through the pool — no public link between campaign and winner.";
       setResult(id, r);
     } catch (e: any) {
+      if (sinceBlock !== undefined && connectedAddress) {
+        const landed = await poolTouchTxSince(sinceBlock, connectedAddress);
+        if (landed) {
+          setResult(id, {
+            status: "ok",
+            title: "Action confirmed on-chain",
+            rows: [
+              { label: label, value: tokenSymbol ?? "STRK" },
+              ...advisoryRow,
+              { label: "Transaction", value: shortHex(landed), hash: landed },
+            ],
+            note: "The wallet timed out replying, but the STRK20 action was already confirmed on-chain.",
+          });
+          return landed;
+        }
+      }
       setResult(id, {
         status: "error",
         title: "Could not confirm transaction",
