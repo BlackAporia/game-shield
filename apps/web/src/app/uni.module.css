@@ -1300,3 +1300,24 @@
   font-weight: 600;
 }
 .warnLink:hover { color: var(--paper); }
+
+.starkliBox {
+  margin-top: 14px;
+  padding: 14px 18px;
+  border-radius: var(--radius-md);
+  background: rgba(73, 240, 255, 0.04);
+  border: 1px solid rgba(73, 240, 255, 0.18);
+}
+.starkliCode {
+  margin: 10px 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(8, 9, 24, 0.7);
+  border: 1px solid rgba(73, 240, 255, 0.18);
+  font-family: var(--font-mono-ui);
+  font-size: 12.5px;
+  color: var(--cyan);
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-x: auto;
+}

@@ -1348,6 +1348,29 @@ export default function Page() {
               Probe STRK20
             </button>
           </div>
+
+          <div className={styles.starkliBox}>
+            <div className={styles.hint}>
+              <b>If Deploy contracts keeps showing a stuck Confirm button in Ready X:</b>{" "}
+              bypass the wallet's fee-review entirely by deploying via the{" "}
+              <a
+                className={styles.warnLink}
+                href="https://book.starkli.rs/installation"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                starkli CLI
+              </a>
+              {" "}in your terminal. The repo ships an automated script:
+            </div>
+            <pre className={styles.starkliCode}>{`# from repo root
+OWNER_ADDRESS=<your Starknet address> bash scripts/deploy-starkli.sh`}</pre>
+            <div className={styles.hint}>
+              The script writes <b className={styles.mono}>scripts/deploy-output.json</b>{" "}
+              with the new Registry + Helper addresses. Paste them into the
+              Save fields above and click Save.
+            </div>
+          </div>
           {deployResult ? <ResultCard r={deployResult} /> : null}
           </section>
         </details>
