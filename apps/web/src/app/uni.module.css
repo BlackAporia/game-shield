@@ -538,6 +538,9 @@
   opacity: 0.5;
   cursor: default;
 }
+.refreshSpin {
+  animation: gs-spin 0.9s linear infinite;
+}
 
 .hint {
   color: var(--muted-soft);
@@ -977,6 +980,7 @@
 .receiptPending .receiptIcon {
   background: rgba(255, 189, 61, 0.14);
   color: var(--amber);
+  animation: gs-spin 1.4s linear infinite;
 }
 .receiptError .receiptIcon {
   background: rgba(255, 110, 110, 0.14);
@@ -1096,6 +1100,14 @@
     transform: translateY(0);
   }
 }
+@keyframes gs-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .page,
@@ -1166,6 +1178,23 @@
   .winnerBtns,
   .campaignActions {
     width: 100%;
+  }
+}
+
+@media (max-width: 560px) {
+  .formRow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .formRow .input,
+  .formRow .btn,
+  .formRow .btnCta,
+  .formRow .tokenPicker,
+  .formRow select.input {
+    width: 100%;
+  }
+  .formRow .tokenPicker {
+    justify-content: flex-start;
   }
 }
 

@@ -31,7 +31,8 @@ pub trait ICampaignRegistry<T> {
     ) -> u64;
     fn complete_campaign(ref self: T, campaign_id: u64, winner_commitment: felt252);
     fn cancel_campaign(ref self: T, campaign_id: u64);
-    fn set_helper(ref self: T, helper: ContractAddress);
+    fn propose_helper(ref self: T, new_helper: ContractAddress);
+    fn accept_helper(ref self: T);
     fn get_campaign(self: @T, campaign_id: u64) -> Campaign;
     fn get_campaign_count(self: @T) -> u64;
     fn is_payout_valid(
@@ -58,6 +59,9 @@ mod errors {
     pub const ALREADY_PAID: felt252 = 'ALREADY_PAID';
     pub const WRONG_COMMITMENT: felt252 = 'WRONG_COMMITMENT';
     pub const WRONG_AMOUNT: felt252 = 'WRONG_AMOUNT';
+    pub const DEADLINE_PASSED: felt252 = 'DEADLINE_PASSED';
+    pub const ZERO_HELPER: felt252 = 'ZERO_HELPER';
+    pub const NOT_PENDING_HELPER: felt252 = 'NOT_PENDING_HELPER';
 }
 
 #[starknet::contract]
@@ -67,13 +71,14 @@ pub mod CampaignRegistry {
         StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
         StoragePointerWriteAccess,
     };
-    use starknet::{ContractAddress, get_caller_address};
+    use starknet::{ContractAddress, get_block_timestamp, get_caller_address};
     use super::{Campaign, CampaignStatus, errors};
 
     #[storage]
     struct Storage {
         owner: ContractAddress,
         helper: ContractAddress,
+        pending_helper: ContractAddress,
         campaigns: starknet::storage::Map<u64, Campaign>,
         campaign_count: u64,
     }
@@ -85,6 +90,7 @@ pub mod CampaignRegistry {
         CampaignCompleted: CampaignCompleted,
         CampaignCancelled: CampaignCancelled,
         PayoutMarked: PayoutMarked,
+        HelperChangeProposed: HelperChangeProposed,
         HelperChanged: HelperChanged,
     }
 
@@ -121,6 +127,12 @@ pub mod CampaignRegistry {
     }
 
     #[derive(Drop, starknet::Event)]
+    struct HelperChangeProposed {
+        #[key]
+        new_helper: ContractAddress,
+    }
+
+    #[derive(Drop, starknet::Event)]
     struct HelperChanged {
         #[key]
         old_helper: ContractAddress,
@@ -146,6 +158,7 @@ pub mod CampaignRegistry {
             assert(reward_amount != 0, errors::ZERO_REWARD);
             assert(deadline != 0, errors::ZERO_DEADLINE);
             assert(token.is_non_zero(), errors::ZERO_TOKEN);
+            assert(get_block_timestamp() < deadline, errors::DEADLINE_PASSED);
 
             let campaign_id = self.campaign_count.read() + 1;
             self
@@ -188,6 +201,7 @@ pub mod CampaignRegistry {
             assert(campaign.organizer == get_caller_address(), errors::NOT_ORGANIZER);
             assert(campaign.status == CampaignStatus::Active, errors::NOT_ACTIVE);
             assert(winner_commitment.is_non_zero(), errors::WRONG_COMMITMENT);
+            assert(get_block_timestamp() <= campaign.deadline, errors::DEADLINE_PASSED);
 
             campaign.status = CampaignStatus::Completed;
             campaign.winner_commitment = winner_commitment;
@@ -210,14 +224,28 @@ pub mod CampaignRegistry {
             );
         }
 
-        fn set_helper(ref self: ContractState, helper: ContractAddress) {
+        fn propose_helper(ref self: ContractState, new_helper: ContractAddress) {
             assert(get_caller_address() == self.owner.read(), errors::NOT_OWNER);
+            assert(new_helper.is_non_zero(), errors::ZERO_HELPER);
+            self.pending_helper.write(new_helper);
+            self
+                .emit(
+                    Event::HelperChangeProposed(
+                        HelperChangeProposed { new_helper },
+                    ),
+                );
+        }
+
+        fn accept_helper(ref self: ContractState) {
+            let pending = self.pending_helper.read();
+            assert(get_caller_address() == pending, errors::NOT_PENDING_HELPER);
             let old_helper = self.helper.read();
-            self.helper.write(helper);
+            self.helper.write(pending);
+            self.pending_helper.write(Zero::zero());
             self
                 .emit(
                     Event::HelperChanged(
-                        HelperChanged { old_helper, new_helper: helper },
+                        HelperChanged { old_helper, new_helper: pending },
                     ),
                 );
         }

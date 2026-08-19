@@ -28,7 +28,7 @@ export function tokenByAddress(address: string): TokenInfo {
     REWARD_TOKENS.find((t) => num.toHex(t.address) === a) ?? {
       symbol: "TOKEN",
       address: a,
-      decimals: 18,
+      decimals: 0,
       name: "Unknown token",
     }
   );

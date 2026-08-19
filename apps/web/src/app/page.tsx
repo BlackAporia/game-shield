@@ -368,7 +368,8 @@ export default function Page() {
     actions: WALLET_API.STRK20_ACTION[],
     id: number,
     label: string,
-    tokenSymbol?: string
+    tokenSymbol?: string,
+    settlementAdvisory?: string
   ): Promise<string | undefined> {
     if (!myWalletAccount) {
       setResult(id, errorResult("No WalletAccount available."));
@@ -378,6 +379,9 @@ export default function Page() {
       setResult(id, errorResult("STRK20 actions are available on Mainnet only."));
       return undefined;
     }
+    const advisoryRow: ResultRow[] = settlementAdvisory
+      ? [{ label: "On-chain settlement", value: settlementAdvisory }]
+      : [];
     let txH: string;
     try {
       setResult(id, {
@@ -403,18 +407,23 @@ export default function Page() {
     setResult(id, {
       status: "pending",
       title: "Waiting for confirmation…",
-      rows: [{ label: label, value: tokenSymbol ?? "STRK" }, { label: "Transaction", value: shortHex(txH), hash: txH }],
+      rows: [
+        { label: label, value: tokenSymbol ?? "STRK" },
+        ...advisoryRow,
+        { label: "Transaction", value: shortHex(txH), hash: txH },
+      ],
     });
     try {
       const txR = await provider.waitForTransaction(txH, { retries: 400, retryInterval: 3000 });
       const r = receiptToResult(txR, txH);
+      if (advisoryRow.length) r.rows = [...(r.rows ?? []), ...advisoryRow];
       r.note = "Private STRK20 action confirmed. The reward moves through the pool — no public link between campaign and winner.";
       setResult(id, r);
     } catch (e: any) {
       setResult(id, {
         status: "error",
         title: "Could not confirm transaction",
-        rows: [{ label: "Transaction", value: shortHex(txH), hash: txH }],
+        rows: [{ label: "Transaction", value: shortHex(txH), hash: txH }, ...advisoryRow],
         note: e?.message ?? e?.toString?.() ?? String(e),
       });
     }
@@ -680,10 +689,10 @@ export default function Page() {
           provider.getClassHashAt(hel),
         ]);
         const knownRegistry = [
-          "0x03d66f6b5440217339cb6e70dc6c9f4796e9e9ec374903ce3c9a3db354ef6057",
+          "0x7efa4207e9856f6483477e16abd4356c8f41dd20d937e223d2b62633e4f7585",
         ];
         const knownHelper = [
-          "0x0b05e4056756329c29a6259ee650ea5f7a6a61a8ddc3f6f7a9701b4edc7e63",
+          "0xb05e4056756329c29a6259ee650ea5f7a6a61a8ddc3f6f7a9701b4edc7e63",
         ];
         let lastDeployed: any = {};
         try {
@@ -762,20 +771,22 @@ export default function Page() {
       setDeployResult(errorResult("Save the Registry and Helper addresses first."));
       return;
     }
-    setDeployState("Linking helper to registry…");
+    setDeployState("Proposing helper to registry…");
     try {
       const link = await myWalletAccount.execute([
-        { contractAddress: registry, entrypoint: "set_helper", calldata: [helper] },
+        { contractAddress: registry, entrypoint: "propose_helper", calldata: [helper] },
       ] as any);
       await provider.waitForTransaction(link.transaction_hash, { retries: 400, retryInterval: 3000 });
       setDeployResult({
         status: "ok",
-        title: "Helper linked",
+        title: "Helper proposed",
         rows: [
           { label: "Registry", value: registry },
           { label: "Helper", value: helper },
         ],
-        note: "set_helper confirmed on-chain from your wallet.",
+        note:
+          "Helper proposed. The helper itself must call accept_helper() before it can mark campaigns paid. " +
+          "The live v2 flow does not use the helper, so this is informational.",
       });
     } catch (e: any) {
       setDeployResult(errorResult(e?.message ?? e?.toString?.() ?? String(e)));
@@ -1073,6 +1084,13 @@ export default function Page() {
   // Payout: private STRK20 payout — the organizer's shielded note is transferred
   // straight to the winner's shielded balance. The pool never reveals amounts or
   // the link between the bounty and the winner.
+  // NOTE (SEC-01): the live v2 flow performs a direct STRK20 `transfer` from the
+  // organizer's shielded note to the winner and does NOT call the registry's
+  // payout entrypoint. The registry's `paid` flag is therefore advisory
+  // (informational) and may not reflect actual settlement. UI labels the action
+  // "Send private reward" to make this clear.
+  const PAYOUT_SETTLEMENT_ADVISORY =
+    "advisory only — `paid` flag is not updated by this dapp; the registry's payout state is informational";
   const handlePayout = async (c: Campaign, winnerAddr: string) => {
     setBusyFor(c.id, "payout");
     try {
@@ -1080,7 +1098,7 @@ export default function Page() {
       const actions: WALLET_API.STRK20_ACTION[] = [
         { type: "transfer", token: c.token, amount: num.toHex(c.rewardAmount), recipient: validateAddr(winnerAddr) },
       ];
-      await submitPrivate(actions, c.id, "Payout reward", symbolFor(c.token));
+      await submitPrivate(actions, c.id, "Send private reward", symbolFor(c.token), PAYOUT_SETTLEMENT_ADVISORY);
       await refreshCampaigns();
     } finally {
       setBusyFor(c.id);
@@ -1163,7 +1181,10 @@ export default function Page() {
           className={styles.input}
           placeholder="Winner address 0x… (never published on-chain)"
           value={winner}
-          onChange={(e) => setWinner(e.target.value)}
+          onChange={(e) => {
+            setWinner(e.target.value);
+            if (winnerErr) setWinnerErr("");
+          }}
           disabled={busy[c.id] !== undefined}
         />
         <div className={styles.winnerBtns}>
@@ -1183,7 +1204,7 @@ export default function Page() {
               onClick={() => submitWinner("payout")}
               title={strk20Supported === false ? "Wallet does not support STRK20" : undefined}
             >
-              {busy[c.id] === "payout" ? "…" : "Private payout"}
+              {busy[c.id] === "payout" ? "…" : "Send private reward"}
             </button>
           )}
         </div>
@@ -1251,6 +1272,11 @@ export default function Page() {
           <div className={styles.hint}>
             One-time setup on Mainnet (the STRK20 pool lives there). Deploy with your wallet
             or paste already-deployed addresses.
+          </div>
+          <div className={styles.hint}>
+            GameShield contracts are at v4. If you deployed an older version, click Deploy
+            contracts again to redeploy with the latest version (deadline enforcement +
+            two-step helper handover).
           </div>
           <div className={styles.formRow}>
             <button
@@ -1432,12 +1458,12 @@ export default function Page() {
                 Campaigns
                 <span className={styles.refreshGroup}>
                   <button
-                    className={styles.refresh}
+                    className={`${styles.refresh} ${loading ? styles.refreshSpin : ""}`}
                     onClick={refreshCampaigns}
                     disabled={loading}
                     title="Refresh campaign list from the chain"
                   >
-                    {loading ? "…" : "↻"}
+                    ↻
                   </button>
                   <button
                     className={styles.refresh}
@@ -1472,6 +1498,11 @@ export default function Page() {
                         {statusName(c.status)}
                         {c.paid ? " · paid" : ""}
                       </span>
+                      {c.status === 1 && !c.paid ? (
+                        <span className={styles.campaignOrg} title="The live v2 flow does not call the registry's payout entrypoint; the `paid` flag is therefore advisory and may not reflect actual settlement.">
+                          (advisory — registry `paid` is not set by the live flow)
+                        </span>
+                      ) : null}
                       <span className={styles.campaignOrg}>by {shortHex(c.organizer)}</span>
                     </div>
                     <div className={styles.campaignIntro}>

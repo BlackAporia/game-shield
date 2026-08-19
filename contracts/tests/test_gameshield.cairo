@@ -29,6 +29,13 @@ fn cheat_caller_for(target: ContractAddress, caller: felt252) {
     cheat_caller_address(target, addr(caller), CheatSpan::TargetCalls(one.try_into().unwrap()));
 }
 
+// Same as cheat_caller_for but takes a ContractAddress directly (used when the
+// caller is a deployed contract, e.g. the helper accepting its own appointment).
+fn cheat_caller_addr(target: ContractAddress, caller: ContractAddress) {
+    let one: u32 = 1;
+    cheat_caller_address(target, caller, CheatSpan::TargetCalls(one.try_into().unwrap()));
+}
+
 fn deploy_registry() -> ContractAddress {
     deploy_registry_with_owner(ORGANIZER)
 }
@@ -43,9 +50,11 @@ fn deploy_helper(registry: ContractAddress) -> ContractAddress {
     let class = declare("PayoutHelper").unwrap().contract_class();
     let (address, _) = class.deploy(@array![addr(POOL).into(), registry.into()]).unwrap();
 
-    // Wire the helper into the registry (owner-only).
+    // Two-step helper handover (owner-only): owner proposes, helper contract accepts.
     cheat_caller_for(registry, ORGANIZER);
-    ICampaignRegistryDispatcher { contract_address: registry }.set_helper(address);
+    ICampaignRegistryDispatcher { contract_address: registry }.propose_helper(address);
+    cheat_caller_addr(registry, address);
+    ICampaignRegistryDispatcher { contract_address: registry }.accept_helper();
     address
 }
 
@@ -247,12 +256,37 @@ fn cannot_fund_cancelled_campaign() {
 
 #[test]
 #[should_panic(expected: ('NOT_OWNER',))]
-fn set_helper_only_owner() {
+fn propose_helper_only_owner() {
     let registry = deploy_registry();
 
     cheat_caller_for(registry, ALICE);
     ICampaignRegistryDispatcher { contract_address: registry }
-        .set_helper(addr('any-helper'));
+        .propose_helper(addr('any-helper'));
+}
+
+#[test]
+#[should_panic(expected: ('NOT_PENDING_HELPER',))]
+fn accept_helper_only_proposed() {
+    let registry = deploy_registry();
+
+    // Owner proposes a candidate.
+    cheat_caller_for(registry, ORGANIZER);
+    ICampaignRegistryDispatcher { contract_address: registry }
+        .propose_helper(addr('proposed-helper'));
+
+    // A random caller (not the proposed helper) tries to accept — must revert.
+    cheat_caller_for(registry, ALICE);
+    ICampaignRegistryDispatcher { contract_address: registry }.accept_helper();
+}
+
+#[test]
+#[should_panic(expected: ('ZERO_HELPER',))]
+fn propose_helper_zero_rejected() {
+    let registry = deploy_registry();
+
+    cheat_caller_for(registry, ORGANIZER);
+    ICampaignRegistryDispatcher { contract_address: registry }
+        .propose_helper(addr(0));
 }
 
 #[test]
@@ -376,4 +410,37 @@ fn deadline_payout_rejected() {
     let _ = invoke_as_pool(helper, Operation::Payout, id, token, 1000, 0x4242, 0x1);
 
     stop_cheat_block_timestamp(helper);
+}
+
+#[test]
+#[should_panic(expected: ('DEADLINE_PASSED',))]
+fn create_campaign_past_deadline_rejected() {
+    let registry = deploy_registry();
+
+    // Fast-forward block.timestamp past the would-be deadline (100).
+    start_cheat_block_timestamp(registry, 200);
+
+    cheat_caller_for(registry, ORGANIZER);
+    ICampaignRegistryDispatcher { contract_address: registry }
+        .create_campaign(1000, 100, CRITERIA, addr(TOKEN));
+
+    stop_cheat_block_timestamp(registry);
+}
+
+#[test]
+#[should_panic(expected: ('DEADLINE_PASSED',))]
+fn complete_campaign_past_deadline_rejected() {
+    let registry = deploy_registry();
+
+    // Create with a generous deadline; block.timestamp is 0 here so it passes.
+    let id = create_campaign(registry, 1000, 100);
+
+    // Fast-forward block.timestamp past the deadline before completing.
+    start_cheat_block_timestamp(registry, 200);
+
+    cheat_caller_for(registry, ORGANIZER);
+    ICampaignRegistryDispatcher { contract_address: registry }
+        .complete_campaign(id, 0x1234);
+
+    stop_cheat_block_timestamp(registry);
 }

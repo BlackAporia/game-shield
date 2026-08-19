@@ -136,13 +136,20 @@
       },
       {
         "type": "function",
-        "name": "set_helper",
+        "name": "propose_helper",
         "inputs": [
           {
-            "name": "helper",
+            "name": "new_helper",
             "type": "core::starknet::contract_address::ContractAddress"
           }
         ],
+        "outputs": [],
+        "state_mutability": "external"
+      },
+      {
+        "type": "function",
+        "name": "accept_helper",
+        "inputs": [],
         "outputs": [],
         "state_mutability": "external"
       },
@@ -315,6 +322,18 @@
   },
   {
     "type": "event",
+    "name": "gameshield::campaign_registry::CampaignRegistry::HelperChangeProposed",
+    "kind": "struct",
+    "members": [
+      {
+        "name": "new_helper",
+        "type": "core::starknet::contract_address::ContractAddress",
+        "kind": "key"
+      }
+    ]
+  },
+  {
+    "type": "event",
     "name": "gameshield::campaign_registry::CampaignRegistry::HelperChanged",
     "kind": "struct",
     "members": [
@@ -353,6 +372,11 @@
       {
         "name": "PayoutMarked",
         "type": "gameshield::campaign_registry::CampaignRegistry::PayoutMarked",
+        "kind": "nested"
+      },
+      {
+        "name": "HelperChangeProposed",
+        "type": "gameshield::campaign_registry::CampaignRegistry::HelperChangeProposed",
         "kind": "nested"
       },
       {

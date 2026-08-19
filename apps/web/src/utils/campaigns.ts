@@ -48,12 +48,22 @@ export function parseCairoBool(value: any): boolean {
   return Boolean(value);
 }
 
-// Winner entitlement commitment: poseidon(campaign_id, winner_address). Computed
-// client-side; only the hash ever reaches the registry and the helper, so the
-// winner's address is never published on-chain.
+// Domain separator for client-computed winner entitlements. Versioned so a
+// future commitment scheme can be introduced without colliding with prior
+// commitments: poseidon(DOMAIN, campaign_id, winner_address).
+export const COMMIT_DOMAIN_V1 = "GAMESHIELD_COMMIT_V1";
+
+// Winner entitlement commitment: poseidon(DOMAIN, campaign_id, winner_address).
+// Computed client-side; only the hash ever reaches the registry and the helper,
+// so the winner's address is never published on-chain. The domain separator
+// binds the commitment to this dapp and prevents cross-protocol replay.
 export function winnerCommitment(campaignId: number | bigint, winnerAddress: string): string {
   return num.toHex(
-    hash.computePoseidonHashOnElements([num.toHex(campaignId), validateAddr(winnerAddress)])
+    hash.computePoseidonHashOnElements([
+      COMMIT_DOMAIN_V1,
+      num.toHex(campaignId),
+      validateAddr(winnerAddress),
+    ])
   );
 }
 

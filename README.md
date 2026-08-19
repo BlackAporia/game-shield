@@ -27,10 +27,12 @@ Every bounty system leaks payment information. GameShield reduces recipient-link
 
 | Component | Role |
 | --- | --- |
-| `contracts/` | Cairo contracts: campaign registry (multi-token) + `privacy_invoke` payout helper |
-| `apps/web` | Next.js dapp: browse, create, fund, private payout |
+| `contracts/` | Cairo contracts: campaign registry (multi-token) + `privacy_invoke` payout helper (helper is **not used by the live v2 flow**; kept for reference) |
+| `apps/web` | Next.js dapp: browse, create, fund, send private reward |
 
 > **v2 flow note:** the v2 dapp uses direct STRK20 `deposit` / `transfer` actions on the privacy pool and bypasses the PayoutHelper contract in the live flow (the `paid` flag on the registry is therefore never set on-chain; the privacy-invoke path was hindered by Ready X not supporting the `OPEN` literal / invoke actions). The PayoutHelper contract is still deployed and remains in the repository for reference, but the live v2 flow does not call it.
+>
+> **SEC-01 honesty note (added 2026-08-19):** the dapp performs a direct STRK20 `transfer` from the organizer's shielded note to the winner. The registry's `paid` flag is therefore **advisory (informational)** and may be inconsistent with actual settlement. The dapp UI labels the payout action "Send private reward" and shows the advisory note in the receipt and on completed-but-unpaid campaign cards. Treat the `paid` flag as a hint, not as proof of payment.
 
 ### Onchain flow (one STRK20 transaction per action)
 

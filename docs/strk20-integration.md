@@ -102,6 +102,8 @@ fund:   [{ type: "deposit", token, amount }]                    -> pool deposit
 payout: [{ type: "transfer", token, amount, recipient }]        -> pool private transfer
 ```
 
+**SEC-01 honesty note (added 2026-08-19):** the live v2 payout is a direct STRK20 `transfer` from the organizer's shielded note to the winner and does **not** call the registry's payout entrypoint. As a result the registry's `paid` flag is **advisory (informational)** and may be inconsistent with actual settlement — treat it as a hint, not as proof of payment. The dapp UI labels the action "Send private reward" and surfaces the advisory note in the receipt and on completed-but-unpaid campaign cards. The PayoutHelper contract remains deployed for reference but is not used by the live flow.
+
 - Campaign registry v2 stores `token: ContractAddress` on-chain (create_campaign now takes
   the token; `is_payout_valid` checks it). Class hashes: registry
   `0x2f99b411abfa12ffc433bdb4b557dda5905b8fda37f6aa357a4e4ad92c530fc`, helper
@@ -115,3 +117,11 @@ payout: [{ type: "transfer", token, amount, recipient }]        -> pool private 
 - Wallet compatibility: Ready X and Xverse support the STRK20 Wallet API (deposit /
   transfer / withdraw). Braavos and MetaMask do not — they can create/complete campaigns
   but not perform private payouts; the dapp degrades gracefully.
+- **Payout state on registry (SEC-01):** the registry's `paid` flag is **advisory** in
+  the v2 flow. The dapp sends a direct STRK20 `transfer` from the organizer's shielded
+  note to the winner and never invokes the registry's payout entrypoint, so a campaign
+  in `Completed` status will typically show `paid = false` even after a real payout has
+  landed on the pool. The dapp UI surfaces this honestly (button label "Send private
+  reward", receipt row "On-chain settlement: advisory only", completed-card footnote).
+  If the helper-driven path is ever reinstated, the dapp must call the registry's
+  payout entrypoint after the shielded transfer to keep the flag accurate.
