@@ -1292,3 +1292,11 @@
 }
 .privacyDetails summary::marker { color: var(--violet); }
 .privacyDetails p { margin: 10px 0; line-height: 1.55; }
+
+.warnLink {
+  color: var(--cyan);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font-weight: 600;
+}
+.warnLink:hover { color: var(--paper); }

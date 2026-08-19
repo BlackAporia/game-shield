@@ -13,6 +13,7 @@ import {
   CAMPAIGN_STATUS,
   getCampaign,
   getCampaignCount,
+  registryContract,
   statusName,
   validateAddr,
   winnerCommitment,
@@ -140,6 +141,7 @@ export default function Page() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [contractOutdated, setContractOutdated] = useState(false);
 
   // create form
   const [campaignTitle, setCampaignTitle] = useState("");
@@ -279,6 +281,31 @@ export default function Page() {
     refreshCampaigns();
   }, [refreshCampaigns, myFrontendProviderIndex]);
 
+  // Detect outdated deployed contracts (v1/v2/v3/v4 without on-chain title) and
+  // surface a prominent "Redeploy v5" CTA.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!hasContracts || !isMainnet) {
+        setContractOutdated(false);
+        return;
+      }
+      try {
+        const c = registryContract(provider, registry);
+        await c.get_campaign_count();
+        const sample: any = await c.get_campaign(1).catch(() => null);
+        if (cancelled) return;
+        // v1/v2/v3/v4 do not include a `title` field on Campaign; v5 does.
+        const hasTitle = sample && Object.prototype.hasOwnProperty.call(sample, "title");
+        setContractOutdated(hasTitle === false);
+      } catch {
+        if (!cancelled) setContractOutdated(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [provider, registry, hasContracts, isMainnet]);
   // Hard refresh: bypass the browser cache so a stale JS bundle can never hide
   // on-chain state changes (e.g. campaigns cancelled in another tab/session).
   // A new query parameter forces the browser to re-fetch the HTML, which in
@@ -961,11 +988,12 @@ export default function Page() {
         const message = e?.message ?? String(e);
         const isOldContract =
           message.toLowerCase().includes("input too long") ||
-          message.toLowerCase().includes("selector");
+          message.toLowerCase().includes("selector") ||
+          message.toLowerCase().includes("input too short");
         setResultCreate(
           errorResult(
             isOldContract
-              ? "The deployed CampaignRegistry at this address does not match GameShield v3. Open Developer settings and click Deploy contracts to redeploy the current version."
+              ? `The deployed CampaignRegistry (v1/v2 — 3 args) is incompatible with the current dapp (v5 — 5 args: reward, deadline, criteria, token, title). Click "Deploy contracts" in Developer settings below to redeploy the current v5 version.`
               : `Campaign contract simulation failed: ${message}`
           )
         );
@@ -1426,6 +1454,14 @@ export default function Page() {
                 <div className={styles.hint}>Connect a wallet to create and manage campaigns.</div>
               ) : null}
               {resultCreate ? <ResultCard r={resultCreate} /> : null}
+              {contractOutdated && (
+                <div className={styles.warn}>
+                  <b>Outdated contracts detected.</b> The deployed CampaignRegistry is an older version
+                  (no on-chain title). The dapp requires GameShield v5.{" "}
+                  <a href="#developer-settings" className={styles.warnLink}>Open Developer settings</a>{" "}
+                  and click <b>Deploy contracts</b> to redeploy.
+                </div>
+              )}
             </section>
 
             {/* List */}
