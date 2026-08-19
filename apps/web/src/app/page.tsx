@@ -269,7 +269,7 @@ export default function Page() {
       const message = e?.message ?? String(e);
       setError(
         message.includes("Cannot convert undefined to a BigInt")
-          ? "Old GameShield contract detected. Open Developer settings and click Deploy contracts to redeploy."
+          ? "Old GameShield contract detected at this address (no on-chain title field). The dapp requires GameShield v5. Open Developer settings below and click Deploy contracts to redeploy the current version."
           : message
       );
     } finally {
