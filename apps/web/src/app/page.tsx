@@ -257,14 +257,21 @@ export default function Page() {
     setLoading(true);
     setError("");
     try {
-      const count = await getCampaignCount(provider, registry);
-      const all: Campaign[] = [];
-      for (let id = 1; id <= count; id++) {
-        const c = await getCampaign(provider, registry, id);
-        if (c.status === 2) continue;
-        all.push(c);
-      }
-      setCampaigns(all.reverse());
+      await Promise.race([
+        (async () => {
+          const count = await getCampaignCount(provider, registry);
+          const all: Campaign[] = [];
+          for (let id = 1; id <= count; id++) {
+            const c = await getCampaign(provider, registry, id);
+            if (c.status === 2) continue;
+            all.push(c);
+          }
+          setCampaigns(all.reverse());
+        })(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Refresh timed out")), 30000)
+        ),
+      ]);
     } catch (e: any) {
       const message = e?.message ?? String(e);
       setError(
@@ -1161,10 +1168,10 @@ export default function Page() {
         { type: "deposit", token: c.token, amount: num.toHex(c.rewardAmount) },
       ];
       await submitPrivate(actions, c.id, "Funding campaign", symbolFor(c.token));
-      await refreshCampaigns();
     } finally {
       setBusyFor(c.id);
     }
+    await refreshCampaigns().catch(() => {});
   };
 
   // Complete: the organizer commits the winner entitlement (a hash of campaign id
@@ -1184,10 +1191,10 @@ export default function Page() {
         c.id,
         "Complete campaign"
       );
-      await refreshCampaigns();
     } finally {
       setBusyFor(c.id);
     }
+    await refreshCampaigns().catch(() => {});
   };
 
   // Payout: private STRK20 payout — the organizer's shielded note is transferred
@@ -1208,10 +1215,10 @@ export default function Page() {
         { type: "transfer", token: c.token, amount: num.toHex(c.rewardAmount), recipient: validateAddr(winnerAddr) },
       ];
       await submitPrivate(actions, c.id, "Send private reward", symbolFor(c.token), PAYOUT_SETTLEMENT_ADVISORY);
-      await refreshCampaigns();
     } finally {
       setBusyFor(c.id);
     }
+    await refreshCampaigns().catch(() => {});
   };
 
   const handleCancel = async (c: Campaign) => {
@@ -1225,6 +1232,7 @@ export default function Page() {
     } finally {
       setBusyFor(c.id);
     }
+    await refreshCampaigns().catch(() => {});
   };
 
   // ─── render helpers ────────────────────────────────────────────────────────
