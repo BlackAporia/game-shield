@@ -26,6 +26,8 @@ Two routes exist; the wallet route is chosen because the dapp never touches view
 
 ## 3. Helper contract pattern (anonymizer)
 
+> **Note (added 2026-08-19):** the helper contract pattern below is reference / informational — the live v2 flow uses direct STRK20 `deposit` / `transfer` actions on the privacy pool and does not call the helper.
+
 The pool calls our contract's `privacy_invoke` entrypoint via `INVOKE_SELECTOR` inside a pool transaction, sandwich:
 
 ```
@@ -39,6 +41,8 @@ pool withdraws input token to helper → helper runs arbitrary logic → helper 
 - Deposit screening (FPI) mandatory on deposits; deposits are public. ~10-block note maturity between related transactions.
 
 ## 4. GameShield contract plan
+
+> **Note (added 2026-08-19):** both contracts are still deployed for reference / informational purposes. The live v2 flow uses direct STRK20 `deposit` / `transfer` actions and does not call `payout_helper.cairo`.
 
 Two Cairo contracts (Scarb + Starknet Foundry):
 
@@ -88,6 +92,8 @@ Requires the organizer's wallet with STRK on mainnet (real funds — user action
 6. Demo video (≤3 min) + verify the project row renders on strk20.starknet.io/hackathon
 
 ## 7c. Status update (2026-08-18 — v2 multi-token rework)
+
+> **Note (added 2026-08-19):** the `PayoutHelper` contract remains deployed as a reference / informational artifact. The live v2 flow described in this section uses direct STRK20 `deposit` / `transfer` actions and does not call the helper.
 
 Root cause of all earlier `INVALID_REQUEST_PAYLOAD` failures found and proven on mainnet:
 Ready X does not implement the `amount: "OPEN"` literal. Probe results: deposit 1 wei,

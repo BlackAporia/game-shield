@@ -95,6 +95,9 @@ type CampaignMetadata = {
   token: string;
   organizer: string;
   commitment: string;
+  // NOTE: title is also stored on-chain in the registry (felt252). The on-chain
+  // title is the source of truth for cross-browser discoverability; the
+  // localStorage copy carries the full multi-byte string for this browser only.
 };
 
 function receiptToResult(txR: any, txH: string): ActionResult {
@@ -690,6 +693,7 @@ export default function Page() {
         ]);
         const knownRegistry = [
           "0x7efa4207e9856f6483477e16abd4356c8f41dd20d937e223d2b62633e4f7585",
+          "0xbf90178de204c169bff30ff7ed6092c4f084827a20a5a2864fc1dde4c08a13",
         ];
         const knownHelper = [
           "0xb05e4056756329c29a6259ee650ea5f7a6a61a8ddc3f6f7a9701b4edc7e63",
@@ -756,43 +760,6 @@ export default function Page() {
       title: "Addresses cleared",
       note: "Now run Deploy contracts to create the real contracts with the connected wallet.",
     });
-  };
-
-  const handleLinkHelper = async () => {
-    if (!myWalletAccount) {
-      setDeployResult(errorResult("Connect a wallet first."));
-      return;
-    }
-    if (!isMainnet) {
-      setDeployResult(errorResult("Linking is available on Mainnet only."));
-      return;
-    }
-    if (!registry || !helper || registry === "0x0" || helper === "0x0") {
-      setDeployResult(errorResult("Save the Registry and Helper addresses first."));
-      return;
-    }
-    setDeployState("Proposing helper to registry…");
-    try {
-      const link = await myWalletAccount.execute([
-        { contractAddress: registry, entrypoint: "propose_helper", calldata: [helper] },
-      ] as any);
-      await provider.waitForTransaction(link.transaction_hash, { retries: 400, retryInterval: 3000 });
-      setDeployResult({
-        status: "ok",
-        title: "Helper proposed",
-        rows: [
-          { label: "Registry", value: registry },
-          { label: "Helper", value: helper },
-        ],
-        note:
-          "Helper proposed. The helper itself must call accept_helper() before it can mark campaigns paid. " +
-          "The live v2 flow does not use the helper, so this is informational.",
-      });
-    } catch (e: any) {
-      setDeployResult(errorResult(e?.message ?? e?.toString?.() ?? String(e)));
-    } finally {
-      setDeployState("");
-    }
   };
 
   // RPC contract_class must contain only the four spec fields (no debug info).
@@ -930,8 +897,9 @@ export default function Page() {
       let seatCount: number;
       let criteriaHash: string;
       let metadata: CampaignMetadata;
+      let title: string;
       try {
-        const title = campaignTitle.trim();
+        title = campaignTitle.trim();
         const details = description.trim();
         if (title.length < 3 || title.length > 80) {
           throw new Error("Campaign title must be 3–80 characters.");
@@ -973,7 +941,13 @@ export default function Page() {
         {
           contractAddress: registry,
           entrypoint: "create_campaign",
-          calldata: [num.toHex(reward), num.toHex(deadline), criteriaHash, campaignToken],
+          calldata: [
+            num.toHex(reward),
+            num.toHex(deadline),
+            criteriaHash,
+            campaignToken,
+            hash.getSelectorFromName(title.trim()),
+          ],
         },
       ];
       setResultCreate({
@@ -1261,11 +1235,20 @@ export default function Page() {
             <article className={styles.workflowStep}><span>02</span><h3>Submit / select winner</h3><p>The organizer commits the winning address as a hash — the plaintext address never goes on-chain.</p></article>
             <article className={styles.workflowStep}><span>03</span><h3>Private payout</h3><p>Deliver the reward as a STRK20 shielded note. Only the winner can reveal the payout.</p></article>
           </div>
+          <details className={styles.privacyDetails}>
+            <summary>How does privacy work?</summary>
+            <div className={styles.hint}>
+              <p>GameShield uses the STRK20 privacy pool to shield STRK/ETH/USDC and other supported tokens — your wallet deposits into the pool and the pool issues shielded notes that only your wallet can later spend.</p>
+              <p>Private balances in the pool are not linked to your main wallet address; the dapp never sees viewing keys, notes, or recipient private keys.</p>
+              <p>Deposits are screened by FPI. Withdrawals and transfers settle through the pool and inherit STRK20&apos;s privacy guarantees against recipient linkage.</p>
+              <p>Note: the campaign registry records amount, token and timing on-chain. Only the winner address is hidden — treats the campaign as a public commitment that the organizer is expected to honour.</p>
+            </div>
+          </details>
         </section>
 
         {/* Deploy / configure contracts — hidden in Developer settings */}
         {showDev ? (
-        <details className={styles.advancedPanel} open>
+        <details id="developer-settings" className={styles.advancedPanel} open>
           <summary>Developer settings</summary>
           <section className={styles.section}>
           <h2 className={styles.sectionTitle}>Contract configuration</h2>
@@ -1310,13 +1293,6 @@ export default function Page() {
             </button>
             <button className={`${styles.btn} ${styles.btnSmall}`} onClick={handleResetManual}>
               Reset
-            </button>
-            <button
-              className={`${styles.btn} ${styles.btnSmall}`}
-              onClick={handleLinkHelper}
-              disabled={!isConnected || deployState !== ""}
-            >
-              Link helper
             </button>
             <button className={`${styles.btn} ${styles.btnSmall}`} onClick={handleCheckWalletApi}>
               Wallet API check
@@ -1475,7 +1451,39 @@ export default function Page() {
                 </span>
               </h2>
               {error ? <div className={styles.warn}>{error}</div> : null}
-              {!loading && !campaigns.length ? (
+              {error && !campaigns.length ? (
+                <div className={styles.hint}>
+                  Could not load campaigns: <b>{error}</b>. Check the connection and try the refresh button.
+                </div>
+              ) : null}
+              {loading && !campaigns.length ? (
+                <>
+                  <div className={styles.skeletonCard} aria-hidden="true" />
+                  <div className={styles.skeletonCard} aria-hidden="true" />
+                  <div className={styles.skeletonCard} aria-hidden="true" />
+                </>
+              ) : null}
+              {!loading && !error && !campaigns.length && isConnected && !hasContracts ? (
+                <div className={styles.hint}>
+                  GameShield contracts are not deployed yet.
+                  <div className={styles.formRow}>
+                    <button
+                      className={styles.btnCta}
+                      onClick={() => {
+                        setShowDev(true);
+                        setTimeout(() => {
+                          document
+                            .getElementById("developer-settings")
+                            ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                        }, 50);
+                      }}
+                    >
+                      Deploy contracts via Developer settings
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+              {!loading && !error && !campaigns.length && (hasContracts || !isConnected) ? (
                 <div className={styles.hint}>No campaigns yet. Create the first one above.</div>
               ) : null}
               {campaigns.map((c) => {
@@ -1488,6 +1496,22 @@ export default function Page() {
                     return Boolean(metadata && num.toBigInt(metadata.commitment) === num.toBigInt(c.criteriaHash));
                   } catch {
                     return false;
+                  }
+                })();
+                const onchainTitle = (() => {
+                  try {
+                    const hex = c.title;
+                    if (!hex || hex === "0x0") return null;
+                    const trimmed = hex.startsWith("0x") ? hex.slice(2) : hex;
+                    let s = "";
+                    for (let i = 0; i < trimmed.length; i += 2) {
+                      const code = parseInt(trimmed.slice(i, i + 2), 16);
+                      if (code === 0) break;
+                      s += String.fromCharCode(code);
+                    }
+                    return s || null;
+                  } catch {
+                    return null;
                   }
                 })();
                 return (
@@ -1506,7 +1530,12 @@ export default function Page() {
                       <span className={styles.campaignOrg}>by {shortHex(c.organizer)}</span>
                     </div>
                     <div className={styles.campaignIntro}>
-                      <h3>{metadataVerified ? metadata.title : `Campaign #${c.id}`}</h3>
+                      <h3>
+                        {onchainTitle || (metadataVerified ? metadata.title : `Campaign #${c.id}`)}
+                        {onchainTitle ? (
+                          <span className={styles.eyebrow} style={{ marginLeft: 8 }}>on-chain</span>
+                        ) : null}
+                      </h3>
                       <p>{metadataVerified ? metadata.description : "Detailed metadata is not available in this browser. The on-chain campaign state remains authoritative."}</p>
                     </div>
                     <div className={styles.campaignBody}>

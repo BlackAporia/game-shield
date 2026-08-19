@@ -21,13 +21,14 @@ Every bounty system leaks payment information. GameShield reduces recipient-link
 
 - **Private rewards** — Fund = private `deposit` of the reward amount, Payout = private `transfer` of the reward amount to the winner. No `OPEN` literal, no invoke actions: these are the action variants every STRK20 wallet implements (verified by on-mainnet probes).
 - **Multi-token rewards** — the campaign registry stores the reward token on-chain; the dapp supports 10 major Starknet tokens with correct decimals.
+- **On-chain title** — title, places and description are committed to the registry (`criteria_hash`) so the campaign metadata survives across browsers; full discovery still requires a metadata indexer.
 - **Wallet compatibility** — Ready X and Xverse support the STRK20 Wallet API (deposit / transfer / withdraw). Braavos and MetaMask do not — they can create and complete campaigns but cannot perform private payouts; the dapp degrades gracefully.
 
 ## Architecture
 
 | Component | Role |
 | --- | --- |
-| `contracts/` | Cairo contracts: campaign registry (multi-token) + `privacy_invoke` payout helper (helper is **not used by the live v2 flow**; kept for reference) |
+| `contracts/` | Cairo contracts: campaign registry (multi-token) + payout helper (helper is **not used by the live v2 flow**; kept for reference) |
 | `apps/web` | Next.js dapp: browse, create, fund, send private reward |
 
 > **v2 flow note:** the v2 dapp uses direct STRK20 `deposit` / `transfer` actions on the privacy pool and bypasses the PayoutHelper contract in the live flow (the `paid` flag on the registry is therefore never set on-chain; the privacy-invoke path was hindered by Ready X not supporting the `OPEN` literal / invoke actions). The PayoutHelper contract is still deployed and remains in the repository for reference, but the live v2 flow does not call it.
@@ -43,6 +44,8 @@ payout:       wallet.strk20InvokeTransaction([{ transfer, token, amount, recipie
 
 The dapp never touches viewing keys — the wallet (Wallet API 0.10.3+, e.g. Ready, Xverse) manages notes, proofs, and submission via `starknet.js` `WalletAccountV6` (`strk20InvokeTransaction`).
 
+> **Note:** PayoutHelper is a reference implementation kept deployed for future escrow/v2.5 work; the live flow uses direct STRK20 transfer.
+
 ## Sprint artifacts
 
 - `strk20.json` — mainnet transactions, contracts, demo links (filled as they exist).
@@ -55,7 +58,7 @@ Campaign registry and payout helper are deployed fresh per redeploy; the dapp ac
 | Component | Address |
 | --- | --- |
 | CampaignRegistry (v2) | deployed from dapp |
-| PayoutHelper (v2) | deployed from dapp |
+| PayoutHelper (reference, informational) | deployed from dapp (live v2 flow does not call it) |
 
 ## Verify locally
 

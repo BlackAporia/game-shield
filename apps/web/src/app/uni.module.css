@@ -19,6 +19,8 @@
   --violet: #9d4dff;
   --magenta: #d63cff;
   --danger: #ff6e6e;
+  --cyan: #49f0ff;
+  --radius-lg: 16px;
   --accent: var(--violet);
   --shadow: 0 28px 90px rgba(0, 0, 0, 0.48);
 
@@ -1251,3 +1253,42 @@
 .ratingRecent b {
   color: var(--paper);
 }
+
+/* ─── campaign-list skeleton + privacy primer ─────────────────────────── */
+
+.skeletonCard {
+  height: 110px;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04) 25%,
+    rgba(255, 255, 255, 0.08) 37%,
+    rgba(255, 255, 255, 0.04) 63%
+  );
+  background-size: 400% 100%;
+  animation: skeletonShimmer 1.4s ease infinite;
+  margin: 14px 0;
+}
+@keyframes skeletonShimmer {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+
+.privacyDetails {
+  margin: 24px 0;
+  padding: 16px 22px;
+  border-radius: var(--radius-lg);
+  background: rgba(8, 9, 24, 0.5);
+  border: 1px solid rgba(157, 77, 255, 0.2);
+}
+.privacyDetails summary {
+  cursor: pointer;
+  color: var(--cyan);
+  font-weight: 600;
+  font-family: var(--font-mono-ui);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  user-select: none;
+}
+.privacyDetails summary::marker { color: var(--violet); }
+.privacyDetails p { margin: 10px 0; line-height: 1.55; }
