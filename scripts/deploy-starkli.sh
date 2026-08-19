@@ -45,7 +45,7 @@ echo "    owner: $OWNER"
 
 # --- 1. Build ---
 echo "==> Building contracts with scarb"
-scarb build
+(cd contracts && scarb build)
 
 # --- 2. Declare registry ---
 echo "==> Declaring CampaignRegistry"
