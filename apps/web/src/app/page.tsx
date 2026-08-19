@@ -846,7 +846,7 @@ export default function Page() {
       const r1ClassHash = pickAddr(r1.class_hash);
       const r1Address = pickAddr(r1.contract_address);
       const r1TxHash = r1.transaction_hash ?? r1.declare_transaction_hash;
-      await wait(r1TxHash);
+      if (r1TxHash) await wait(r1TxHash);
       await verifyDeclared(r1ClassHash, "CampaignRegistry");
       await verifyDeployed(r1Address, r1ClassHash, "CampaignRegistry");
 
@@ -859,7 +859,7 @@ export default function Page() {
       const r2ClassHash = pickAddr(r2.class_hash);
       const r2Address = pickAddr(r2.contract_address);
       const r2TxHash = r2.transaction_hash ?? r2.declare_transaction_hash;
-      await wait(r2TxHash);
+      if (r2TxHash) await wait(r2TxHash);
       await verifyDeclared(r2ClassHash, "PayoutHelper");
       await verifyDeployed(r2Address, r2ClassHash, "PayoutHelper");
 
