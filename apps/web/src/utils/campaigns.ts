@@ -1,4 +1,4 @@
-import { Abi, Contract, hash, num, ProviderInterface } from "starknet";
+import { Abi, Contract, num, ProviderInterface } from "starknet";
 import registryAbi from "../contracts/CampaignRegistry.json";
 import registryV1Abi from "../contracts/CampaignRegistryV1.json";
 import { addrSTRK } from "./constants";
@@ -15,7 +15,6 @@ export type Campaign = {
   deadline: bigint;
   criteriaHash: string;
   status: number;
-  winnerCommitment: string;
   paid: boolean;
   title: string;
 };
@@ -92,24 +91,6 @@ export function parseCairoBool(value: any): boolean {
   return Boolean(value);
 }
 
-// Domain separator for client-computed winner entitlements. Versioned so a
-// future commitment scheme can be introduced without colliding with prior
-// commitments: poseidon(DOMAIN, campaign_id, winner_address).
-export const COMMIT_DOMAIN_V1 = "GAMESHIELD_COMMIT_V1";
-
-// Winner entitlement commitment: poseidon(DOMAIN, campaign_id, winner_address).
-// Computed client-side; only the hash ever reaches the registry and the helper,
-// so the winner's address is never published on-chain. The domain separator
-// binds the commitment to this dapp and prevents cross-protocol replay.
-export function winnerCommitment(campaignId: number | bigint, winnerAddress: string): string {
-  return num.toHex(
-    hash.computePoseidonHashOnElements([
-      COMMIT_DOMAIN_V1,
-      num.toHex(campaignId),
-      validateAddr(winnerAddress),
-    ])
-  );
-}
 
 export function validateAddr(addr: string): string {
   return num.toHex(num.toBigInt(addr));
@@ -140,7 +121,6 @@ export async function getCampaign(
     deadline: num.toBigInt(raw.deadline),
     criteriaHash: num.toHex(raw.criteria_hash as string),
     status: parseCampaignStatus(raw.status),
-    winnerCommitment: num.toHex(raw.winner_commitment as string),
     paid: parseCairoBool(raw.paid),
     title: raw.title ? num.toHex(raw.title as string) : "0x0",
   };
