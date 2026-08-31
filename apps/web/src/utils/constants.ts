@@ -1,42 +1,127 @@
-import { ProviderInterface, RpcProvider } from "starknet";
+import { Abi, Contract, num, ProviderInterface } from "starknet";
+import registryAbi from "../contracts/CampaignRegistry.json";
+import registryV1Abi from "../contracts/CampaignRegistryV1.json";
+import { addrSTRK } from "./constants";
 
-// ─── GameShield config ──────────────────────────────────────────────────────
+// On-chain status of a campaign, matching CampaignStatus in campaign_registry.cairo.
+export const CAMPAIGN_STATUS = ["Active", "Completed", "Cancelled"] as const;
+export type CampaignStatusName = (typeof CAMPAIGN_STATUS)[number];
 
-// The ERC-20 GameShield moves privately: STRK on Starknet (mainnet + sepolia use
-// the same address).
-export const addrSTRK = "0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d";
+export type Campaign = {
+  id: number;
+  organizer: string;
+  token: string;
+  rewardAmount: bigint;
+  deadline: bigint;
+  criteriaHash: string;
+  status: number;
+  paid: boolean;
+  title: string;
+};
 
-// STRK20 privacy pool (mainnet).
-export const PoolAddress = "0x040337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a";
+// Class hash of the legacy v1 CampaignRegistry (already declared on Mainnet).
+// v1 has no on-chain `title`/`token` and its create_campaign takes 3 arguments.
+export const CAMPAIGN_REGISTRY_V1 = "0x43f1247fc09a89c13d776d13e8b6c7814d93193b64c0615e10238392edf038";
 
-// Frontend RPC providers, indexed. Index 0 = Mainnet, index 1 = Sepolia.
-// NEXT_PUBLIC_RPC_MAINNET / NEXT_PUBLIC_RPC_SEPOLIA override the defaults
-// (free public endpoints; an Alchemy key works too).
-export const myFrontendProviders: ProviderInterface[] = [
-  new RpcProvider({
-    nodeUrl:
-      process.env.NEXT_PUBLIC_RPC_MAINNET ??
-      "https://rpc.starknet.lava.build",
-  }),
-  new RpcProvider({
-    nodeUrl:
-      process.env.NEXT_PUBLIC_RPC_SEPOLIA ??
-      "https://starknet-sepolia.public.blastapi.io/rpc/v0_8",
-  }),
-];
+const classHashCache = new Map<string, string>();
 
-// ─── GameShield contracts ────────────────────────────────────────────────────
+export async function registryClassHash(
+  provider: ProviderInterface,
+  address: string
+): Promise<string> {
+  const key = validateAddr(address);
+  const cached = classHashCache.get(key);
+  if (cached) return cached;
+  const classHash = await provider.getClassHashAt(address);
+  classHashCache.set(key, classHash);
+  return classHash;
+}
 
-// Campaign registry (public campaign state) and payout helper (privacy_invoke
-// entry point called by the STRK20 pool). Set after deployment:
-//   NEXT_PUBLIC_REGISTRY_ADDRESS
-//   NEXT_PUBLIC_HELPER_ADDRESS
-export const RegistryAddress =
-  process.env.NEXT_PUBLIC_REGISTRY_ADDRESS ??
-  "0x02d74df1009ea1cd63ddf676a1d68abd6c2aa0da9e44aa9199006cfda5f9ec3e";
-export const HelperAddress =
-  process.env.NEXT_PUBLIC_HELPER_ADDRESS ??
-  "0x01108f56778d7c137deb6c7d0f602311b6a867e649fdfa460d93eb36d7cc27a9";
+export async function isRegistryV1(
+  provider: ProviderInterface,
+  address: string
+): Promise<boolean> {
+  try {
+    const classHash = await registryClassHash(provider, address);
+    return num.toHex(num.toBigInt(classHash)) === num.toHex(num.toBigInt(CAMPAIGN_REGISTRY_V1));
+  } catch {
+    return false;
+  }
+}
 
-// Frontend provider indices where the STRK20 privacy pool is available.
-export const Strk20Networks: Record<number, string> = { 0: "MAINNET", 1: "SEPOLIA" };
+async function registryAbiFor(
+  provider: ProviderInterface,
+  address: string
+): Promise<Abi> {
+  return (await isRegistryV1(provider, address) ? registryV1Abi : registryAbi) as Abi;
+}
+
+export async function registryContract(
+  provider: ProviderInterface,
+  address: string
+): Promise<Contract> {
+  const abi = await registryAbiFor(provider, address);
+  return new Contract({ abi, address, providerOrAccount: provider });
+}
+
+export function statusName(status: number): CampaignStatusName {
+  return CAMPAIGN_STATUS[status] ?? "Active";
+}
+
+// starknet.js v10 parses Cairo enums as { variant: { Active: {}, Completed:
+// undefined, Cancelled: undefined } } — every enum key is present but only the
+// active variant carries a value ({}). The other keys are undefined, so they
+// must be checked by value, not with `in` (which is always true).
+export function parseCampaignStatus(value: any): number {
+  if (typeof value === "number" || typeof value === "bigint") return Number(value);
+  const v = value?.variant;
+  if (v && typeof v === "object") {
+    if (v.Active !== undefined) return 0;
+    if (v.Completed !== undefined) return 1;
+    if (v.Cancelled !== undefined) return 2;
+  }
+  return Number(value);
+}
+
+// Same for the Cairo bool — it can come back as { variant: { True: {} } }.
+export function parseCairoBool(value: any): boolean {
+  if (typeof value === "boolean") return value;
+  const v = value?.variant;
+  if (v && typeof v === "object") return "True" in v;
+  return Boolean(value);
+}
+
+
+export function validateAddr(addr: string): string {
+  return num.toHex(num.toBigInt(addr));
+}
+
+export async function getCampaignCount(
+  provider: ProviderInterface,
+  registry: string
+): Promise<number> {
+  const c = await registryContract(provider, registry);
+  const count = await c.get_campaign_count();
+  return Number(count);
+}
+
+export async function getCampaign(
+  provider: ProviderInterface,
+  registry: string,
+  id: number
+): Promise<Campaign> {
+  const c = await registryContract(provider, registry);
+  const raw: any = await c.get_campaign(id);
+  return {
+    id,
+    organizer: validateAddr(raw.organizer as string),
+    // v1 contracts store no token; the STRK20 pool flow is STRK-only there.
+    token: raw.token ? validateAddr(raw.token as string) : addrSTRK,
+    rewardAmount: num.toBigInt(raw.reward_amount),
+    deadline: num.toBigInt(raw.deadline),
+    criteriaHash: num.toHex(raw.criteria_hash as string),
+    status: parseCampaignStatus(raw.status),
+    paid: parseCairoBool(raw.paid),
+    title: raw.title ? num.toHex(raw.title as string) : "0x0",
+  };
+}
