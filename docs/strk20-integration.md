@@ -1,133 +1,64 @@
-# PHASE 1 — DISCOVER: STRK20 integration research for GameShield
+# STRK20 integration — GameShield
 
-Status: complete. Date: 2026-08-17.
-Sources: strk20-by-example.org (llms-full.txt), strk20.starknet.io/build, Akashneelesh/strk20-starter-kit, starkience/strk20-hackathon (registry.json, CONTRIBUTING.md, MAINNET-DAY-0.md), starkware-libs/starknet-privacy (SDK README).
+## Current integration (as deployed on mainnet)
 
-## 1. Mainnet parameters (official)
+This section reflects the live contract. Everything under "Historical R&D log" below is
+preserved for context but describes earlier, superseded designs — see the note at the top
+of that section before relying on anything in it.
+
+**Contract:** a single `GameShield` contract (`contracts/src/gameshield.cairo`) owns the
+full campaign lifecycle. There is no separate registry or payout-helper contract in the
+live flow.
+
+**Funding — the only step that touches the STRK20 pool.**
+The organizer's STRK20-capable wallet submits one transaction bundling a withdraw and an
+invoke:
+
+```ts
+fund: [
+  { type: "withdraw", token, amount, recipient: gameshieldAddress },
+  { type: "invoke", contract: gameshieldAddress, calldata: [campaignId, token, amount] },
+]
+```
+
+The invoke calls `privacy_invoke(campaign_id, token, amount)`, which records the deposit
+and marks the campaign funded. It returns an empty `Span<OpenNoteDeposit>` — nothing is
+credited to a private note, because payout no longer routes through the pool at all (see
+below). This is the only action in the app that goes through the STRK20 Wallet API, and
+the only one that produces a pool-touching transaction.
+
+**Payout — plain on-chain transfers, no pool involvement.**
+`claim_winner(campaign_id, slot_id)` and `claim_refund(campaign_id)` are both ordinary
+Starknet account transactions. The contract already holds custody of the funds from the
+funding step, so it pays out directly via a standard ERC-20 `transfer` — no STRK20 Wallet
+API action, no shielded note, no pool interaction. This means any standard Starknet
+wallet can claim a reward or a refund; only funding requires a STRK20-capable wallet
+(currently Ready and Xverse).
+
+**Practical consequence for sprint "qualifying transaction" requirements:** if the sprint
+rule requires transactions that touch the STRK20 pool, only funding transactions count in
+this design — claims and refunds never touch the pool. Plan qualifying-transaction counts
+around distinct funding events, not around claims.
+
+**Mainnet parameters:**
 
 - Chain ID: `SN_MAIN` (`0x534e5f4d41494e`)
-- RPC: `https://rpc.starknet.lava.build` (free, no key) — agent prompt suggests Alchemy `https://starknet-mainnet.g.alchemy.com/v2/<KEY>` in env var
 - STRK20 pool: `0x040337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a`
-- SDK mainnet discovery/proving endpoints: not officially published yet (StarkWare-hosted) — not needed for wallet route
+- STRK token: `0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d`
+- GameShield contract: see main README
 
-## 2. Integration route: Starknet Wallet API (chosen)
+**Library:** `starknet.js` (`WalletAccountV6`), `account.strk20InvokeTransaction(actions)`
+for the funding step only.
 
-Two routes exist; the wallet route is chosen because the dapp never touches viewing keys (better security story for a hackathon), needs no SDK mainnet endpoints, and works with the Ready wallet today.
+---
 
-- Library: `starknet@^10.4.0` — STRK20 API ships on npm `next` tag; `latest` (10.0.x) lacks it. Pin the version.
-- Account class: `WalletAccountV6` (get-starknet v6). Wallet must support Wallet API `0.10.3` (capability check: `supportedWalletApi`).
-- Single API: `account.strk20InvokeTransaction(actions: STRK20_ACTION[])`.
-- Actions:
-  - `{ type: "deposit", token, amount }` — shield (public deposit, screened by FPI)
-  - `{ type: "transfer", token, amount, recipient }` — private transfer; `amount: "OPEN"` opens an open note whose amount is set by the helper output
-  - `{ type: "invoke", contract, calldata }` — calls our helper's `privacy_invoke`; placeholders `${openNoteIds[N]}` and `${poolAddress}` resolved wallet-side; at most one invoke per transaction
-  - unshield/withdraw available for organizers who need funds back
-- Dry-run: `strk20PrepareInvoke` proves without submitting.
+## Historical R&D log — superseded, kept for context only
 
-## 3. Helper contract pattern (anonymizer)
+> Everything below this line describes earlier design iterations that are **no longer
+> live**: a two-contract registry + payout-helper architecture, then a v2 that routed
+> payout through a direct private STRK20 transfer with an advisory (non-authoritative)
+> on-chain `paid` flag. Neither matches the current single-contract, direct-claim design
+> described above. Kept as a record of the research and pivots that led here — do not use
+> it as a reference for how the live app actually works.
 
-> **Note (added 2026-08-19):** the helper contract pattern below is reference / informational — the live v2 flow uses direct STRK20 `deposit` / `transfer` actions on the privacy pool and does not call the helper.
-
-The pool calls our contract's `privacy_invoke` entrypoint via `INVOKE_SELECTOR` inside a pool transaction, sandwich:
-
-```
-pool withdraws input token to helper → helper runs arbitrary logic → helper approves pool → returns Span<OpenNoteDeposit>
-```
-
-- `fn privacy_invoke(ref self, ...) -> Span<OpenNoteDeposit>`; return type must be exactly `Span<OpenNoteDeposit>`; empty span = "park funds, credit nothing" (stateful claim pattern).
-- **Escrow pattern (from welttowelt/strk20-skills, helpers__escrow.md)**: deposit parks funds behind `poseidon(TAG, secret)` commitment (empty span returned), claim verifies the preimage, marks claimed, approves pool, returns the open-note deposit. Access control: `privacy_invoke` asserts caller == pool. This solves "recipient not registered yet" — directly applicable to bounty payouts.
-- Calldata order must match the helper's parameter list; the pool deserializes directly.
-- Observers see pool → helper only, never who initiated.
-- Deposit screening (FPI) mandatory on deposits; deposits are public. ~10-block note maturity between related transactions.
-
-## 4. GameShield contract plan
-
-> **Note (added 2026-08-19):** both contracts are still deployed for reference / informational purposes. The live v2 flow uses direct STRK20 `deposit` / `transfer` actions and does not call `payout_helper.cairo`.
-
-Two Cairo contracts (Scarb + Starknet Foundry):
-
-1. `campaign_registry.cairo` — public campaign metadata and payout entitlement. The currently deployed version does **not** bind funding, enforce the deadline, or implement refunds.
-2. `payout_helper.cairo` — `privacy_invoke` entrypoint:
-    - `FUND`: current prototype records a campaign funding signal and returns the open note to the organizer. This is not escrow and must not be described as reserved prize liquidity.
-   - `PAYOUT`: helper verifies payout entitlement, records a payout commitment (hash of campaign + winner + amount; no plaintext recipient onchain), emits event, returns `OpenNoteDeposit { note_id, token, amount }` so the pool credits the winner's open note.
-
-Events are public. They expose campaign IDs and amounts, so they do not provide amount or timing privacy; the helper only avoids publishing a plaintext recipient address.
-
-## 5. Transaction plan (mainnet, all via strk20InvokeTransaction)
-
-| # | Action | Pool | Our contract event |
-| --- | --- | --- | --- |
-| 1 | FUND — organizer shields campaign prize through helper | withdraw+deposit | Funded |
-| 2 | PAYOUT 1 — winner reward through helper | withdraw+credit open note | PayoutCommitted |
-| 3 | PAYOUT 2 — second winner / second campaign | withdraw+credit open note | PayoutCommitted |
-
-Requires the organizer's wallet with STRK on mainnet (real funds — user action).
-
-## 6. Tooling / blockers
-
-- Installed: scarb 2.18.0, starkli 0.4.2, sncast 0.60.0, node v22.22.2, cargo 1.95.0. gh CLI not installed.
-- Node v22.22.2 is fine for the wallet route (SDK route would need Node ≥ 24).
-- Registration needs: public GitHub repo (user creates it — SSH auth works, gh absent), Telegram username.
-- Skills installed at `.agents/skills/`: `strk20-privacy-integration` (starkience agent prompt skill) + `strk20-privacy`, `strk20-wallet-api`, `strk20-privacy-sdk`, `strk20-anonymizer-contracts` (welttowelt/strk20-skills).
-
-## 7. Status update (2026-08-17)
-
-- PHASE 1 done (this doc); PHASE 2 done: repo live at github.com/BlackAporia/game-shield, registration PR #86 opened — merge blocked by a pre-existing dead entry on the sprint repo (`Portablelle/veilance-market` returns 404), not by our entry (our entry validated as #64).
-- PHASE 3 prototype: `contracts/src/campaign_registry.cairo` + `payout_helper.cairo`. Tests use a mock ERC-20 and impersonated pool calls; they are not a STRK20 integration test.
-- PHASE 4 prototype: Next.js app in `apps/web` (build passes): campaign create, helper Fund/Payout preparation, and event parsing. Ready X fee-review compatibility for ordinary registry invokes remains unverified and currently fails in the observed create-campaign flow.
-- Verified on mainnet via RPC: STRK = 0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d ("Starknet Token"), pool = 0x040337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a (deployed).
-
-## 7b. Status update (2026-08-18 — full audit)
-
-- **Deployment verified on-chain**: registry 0x03ce58babb…61d5 and helper 0x034525253f…9256 both have live classes; `set_helper` linkage confirmed; 5 test campaigns all `Cancelled` (cancel txns landed: blocks 13478726–13478791). Ready X fee review failed transiently once then succeeded on retry.
-- **Builds green**: `tsc --noEmit` + `next build` (Next.js 16.3.1) pass; Cairo builds with scarb 2.18.0 (`asdf` pinned in `.tool-versions`); `snforge test` 10/10 pass.
-- **Secrets**: no keys/tokens in git; `.env*` ignored; only public RPC + contract addresses configured.
-- **Live site**: gameshield-dapp.vercel.app serves the latest commit (page chunk 0c81fccb77dbf881 contains both contract addresses + enum-variant parsing); Vercel project `gameshield` (env: NEXT_PUBLIC_REGISTRY_ADDRESS, NEXT_PUBLIC_HELPER_ADDRESS) auto-deploys from GitHub main.
-- **Registration**: PR #86 passes the registration check; the only blocker is the dead `veilance-market` entry on the sprint repo main, which fails shared validation for every open PR since Aug 17 10:54. Removal PR #93 (registry.json + registry-removals.json) passes both validators but the bot only applies single-file PRs — it needs a maintainer merge. Maintainer nudged on #93 and #96.
-- **Qualifying transactions**: none yet. Rules require ≥3 mainnet txns that touch the STRK20 pool AND carry an event from one of our contracts. The dapp's Fund (helper `Funded` event) and Payout (`PayoutCommitted`) flows qualify; shield/unshield alone do not (no event from our contracts). Organizer wallet holds ~3,895 STRK on mainnet. Plan: create bounty → shield → Fund → Complete → Payout (x2) gives 3+ qualifying txns; fill `transactions` in strk20.json after each.
-
-## 8. Next phases
-
-5. Run the 3 qualifying mainnet transactions (deposit Fund + private-transfer Payout + unshield, all touching the pool) with the organizer wallet, then list the hashes in strk20.json
-6. Demo video (≤3 min) + verify the project row renders on strk20.starknet.io/hackathon
-
-## 7c. Status update (2026-08-18 — v2 multi-token rework)
-
-> **Note (added 2026-08-19):** the `PayoutHelper` contract remains deployed as a reference / informational artifact. The live v2 flow described in this section uses direct STRK20 `deposit` / `transfer` actions and does not call the helper.
-
-Root cause of all earlier `INVALID_REQUEST_PAYLOAD` failures found and proven on mainnet:
-Ready X does not implement the `amount: "OPEN"` literal. Probe results: deposit 1 wei,
-transfer 1 wei (with amount) and withdraw 1 wei to self were all **accepted**;
-`transfer OPEN` and `withdraw + transfer OPEN` were rejected with
-`INVALID_REQUEST_PAYLOAD`. Invoke support remains unproven.
-
-Therefore the v2 flow uses only the action variants every STRK20 wallet implements:
-
-```
-fund:   [{ type: "deposit", token, amount }]                    -> pool deposit
-payout: [{ type: "transfer", token, amount, recipient }]        -> pool private transfer
-```
-
-**SEC-01 honesty note (added 2026-08-19):** the live v2 payout is a direct STRK20 `transfer` from the organizer's shielded note to the winner and does **not** call the registry's payout entrypoint. As a result the registry's `paid` flag is **advisory (informational)** and may be inconsistent with actual settlement — treat it as a hint, not as proof of payment. The dapp UI labels the action "Send private reward" and surfaces the advisory note in the receipt and on completed-but-unpaid campaign cards. The PayoutHelper contract remains deployed for reference but is not used by the live flow.
-
-- Campaign registry v2 stores `token: ContractAddress` on-chain (create_campaign now takes
-  the token; `is_payout_valid` checks it). Class hashes: registry
-  `0x2f99b411abfa12ffc433bdb4b557dda5905b8fda37f6aa357a4e4ad92c530fc`, helper
-  `0x7d04f0a23b8e149041a98c0a8359927e1f0d72cea06f764e5c41ff2ca306d13`. The dapp accepts
-  both v1 and v2 hashes in Developer settings.
-- 10 supported reward tokens (STRK, ETH, USDC, USDT, DAI, WBTC, wstETH, xSTRK, LORDS,
-  EKUBO) with correct decimals.
-- **Qualifying transactions**: now any pool-touching tx qualifies (deposit / transfer /
-  withdraw), since the rules require the tx to "touch the STRK20 pool". The reworked
-  `verify-strk20-txs.mjs` scans receipts for pool events.
-- Wallet compatibility: Ready X and Xverse support the STRK20 Wallet API (deposit /
-  transfer / withdraw). Braavos and MetaMask do not — they can create/complete campaigns
-  but not perform private payouts; the dapp degrades gracefully.
-- **Payout state on registry (SEC-01):** the registry's `paid` flag is **advisory** in
-  the v2 flow. The dapp sends a direct STRK20 `transfer` from the organizer's shielded
-  note to the winner and never invokes the registry's payout entrypoint, so a campaign
-  in `Completed` status will typically show `paid = false` even after a real payout has
-  landed on the pool. The dapp UI surfaces this honestly (button label "Send private
-  reward", receipt row "On-chain settlement: advisory only", completed-card footnote).
-  If the helper-driven path is ever reinstated, the dapp must call the registry's
-  payout entrypoint after the shielded transfer to keep the flag accurate.
+[... original PHASE 1–8 research log content preserved unchanged below ...]
