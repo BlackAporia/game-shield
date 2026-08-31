@@ -130,6 +130,56 @@
   color: var(--paper);
   background: rgba(255, 244, 223, 0.08);
 }
+.navCta {
+  padding: 9px 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--bg);
+  background: linear-gradient(120deg, var(--ember), var(--amber));
+  box-shadow: 0 10px 26px rgba(255, 106, 0, 0.28);
+  white-space: nowrap;
+}
+.navCta:hover {
+  filter: brightness(1.06);
+}
+
+/* Hamburger toggle — hidden on desktop, shown under the 720px breakpoint. */
+.navToggle {
+  display: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(17, 19, 43, 0.6);
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.navToggleBar {
+  width: 18px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--paper);
+  transition: transform 0.2s, opacity 0.2s;
+}
+.navToggleOpen .navToggleBar:nth-child(1) {
+  transform: translateY(6px) rotate(45deg);
+}
+.navToggleOpen .navToggleBar:nth-child(2) {
+  opacity: 0;
+}
+.navToggleOpen .navToggleBar:nth-child(3) {
+  transform: translateY(-6px) rotate(-45deg);
+}
+
+/* Mobile drawer — the actual fix: links + wallet connect, stacked and
+   reachable, instead of silently overflowing off the edge of the navbar. */
+.navDrawer {
+  display: none;
+}
 
 .connectPill {
   display: inline-flex;
@@ -349,6 +399,14 @@
   font-size: 17px;
   line-height: 1.65;
 }
+.heroCtas {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 28px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
 .eyebrow {
   display: inline-flex;
   align-items: center;
@@ -562,6 +620,24 @@
   background: rgba(255, 106, 0, 0.08);
   color: var(--muted);
   font-size: 14px;
+}
+.authToast {
+  position: fixed;
+  top: 78px;
+  right: 24px;
+  z-index: 70;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  width: min(560px, calc(100vw - 48px));
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.35);
+}
+.authToast > span {
+  flex: 1;
+}
+.authToast .modalClose {
+  flex: 0 0 auto;
+  margin: -6px -8px 0 0;
 }
 
 /* ─── inputs & buttons ─────────────────────────────────────────────────── */
@@ -1142,9 +1218,44 @@
     width: calc(100% - 28px);
     padding: 12px 0;
   }
-  .brandParent,
-  .navLink {
+  .brandParent {
     display: none;
+  }
+  .navActions {
+    display: none;
+  }
+  .navToggle {
+    display: flex;
+  }
+  .navDrawer {
+    display: none;
+    flex-direction: column;
+    gap: 4px;
+    width: calc(100% - 28px);
+    margin: 0 auto 14px;
+    padding: 14px;
+    border-radius: 16px;
+    background: rgba(11, 12, 27, 0.96);
+    border: 1px solid var(--line);
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+  }
+  .navDrawerOpen {
+    display: flex;
+  }
+  .navDrawer .navLink {
+    display: block;
+    padding: 12px 14px;
+    border-radius: 12px;
+  }
+  .navDrawer .navCta {
+    display: block;
+    text-align: center;
+    padding: 12px 14px;
+  }
+  .navDrawerWallet {
+    padding-top: 6px;
+    margin-top: 6px;
+    border-top: 1px solid var(--line);
   }
   .hero {
     padding: 130px 0 26px;
