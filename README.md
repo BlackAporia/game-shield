@@ -1,86 +1,137 @@
-# GameShield — Private Gaming Bounty Hub
+# GameShield — Gaming Bounty Hub
 
-GameShield is a STRK20 prototype for private gaming reward flows on Starknet. It uses the STRK20 pool directly — rewards are deposited, transferred and withdrawn as shielded notes by the wallet's Wallet API, so the dapp never handles viewing keys, notes, proofs, or recipient private keys.
+GameShield is a Starknet application for running gaming bounties end to end: organizers fund a reward pot through STRK20, review applicants, split the pot across any number of winners, and each winner claims their reward directly — with automatic, permissionless refund paths and no admin or dispute role anywhere in the contract.
 
-## Why STRK20
+Built for the **STRK20 Private Sprint**.
 
-Every bounty system leaks payment information. GameShield reduces recipient-linkage exposure by routing reward delivery through STRK20 shielded notes:
+## Contents
 
-- **Organizers** shield any supported token (STRK, ETH, USDC, USDT, DAI, WBTC, wstETH, xSTRK, LORDS, EKUBO, …) into private notes held by their wallet.
-- **Winners** receive a private note straight from the organizer's shielded balance — the pool settles the transfer without publishing who won or how much.
-- **Payouts are verifiable** — the registry records a commitment (a hash of campaign id and winner address), never the plaintext winner.
+- [How it works](#how-it-works)
+- [Design decision: from commit-reveal to public payout](#design-decision-from-commit-reveal-to-public-payout)
+- [Privacy model and current limitations](#privacy-model-and-current-limitations)
+- [Features](#features)
+- [Architecture](#architecture)
+- [On-chain flow](#on-chain-flow)
+- [Deployment (mainnet)](#deployment-mainnet)
+- [Getting started](#getting-started)
+- [Status](#status)
+- [License](#license)
 
-### Privacy and current limitations
+## How it works
 
-- Deposits, pool events, campaign IDs, reward amounts, and timing are public. GameShield does **not** provide full unlinkability against amount/timing correlation.
-- Funding a campaign shields the reward into the organizer's own note. It is **not escrow** and does not reserve a campaign prize on-chain. Treat a campaign as a commitment until the organizer proves the shielded balance.
-- Winners need a STRK20-compatible wallet (Ready, Xverse). Other wallets (Braavos, MetaMask) can create and complete campaigns but cannot perform private payouts.
-- Campaign reward, token and exact deadline are stored on-chain. Title, places and detailed rules are local MVP metadata whose integrity commitment is stored in `criteria_hash`; they are not yet shared across browsers because the project has no metadata indexer.
+- **Organizers** fund a campaign from a STRK20-capable wallet. Funding withdraws the reward token to the GameShield contract and calls its deposit-only `privacy_invoke` entry point, which records the deposit — nothing more.
+- **Participants** connect a wallet and apply to a campaign. The organizer reviews applicants and assigns one or more winner slots from that list.
+- **Winners** are assigned by their real wallet address. Only that address can claim its slot; the contract pays it out directly with a plain ERC-20 `transfer`.
+- **Refunds** are fully automatic and permissionless. Unallocated funds (after the assignment grace period) and unclaimed expired slots (after the claim expiry window) both sweep into the campaign's `refund_pool`, which only the organizer can drain — back to their own address, no separate commitment required.
+
+GameShield doesn't build its own shielding feature. Ready and Xverse already do this well through the STRK20 Wallet API, so organizers fund from a shielded balance in their own wallet rather than GameShield handling viewing keys, notes, or proofs itself.
+
+## Design decision: from commit-reveal to public payout
+
+The contract originally paid winners through a commit-reveal scheme (`CommitClaim` / `RevealClaim`), so a claimant's identity stayed hidden until the moment they claimed. That required submitting a secret in the reveal transaction's calldata — and Starknet calldata is visible in the mempool before a transaction confirms. In principle, anyone watching a pending `RevealClaim` could read the secret and race it with a competing claim.
+
+The underlying exposure only existed because the *payout destination* was still decided at reveal time, by whoever submitted it. Once we noticed that, the fix was simpler than patching around the race: remove that degree of freedom entirely. `add_winner` now takes the winner's real wallet address directly — the organizer already has it, since they're picking from a list of applicants. A slot's payout is fixed the moment it's assigned, long before any claim transaction exists, so there's nothing left in a pending claim for a bystander to steal.
+
+The tradeoff is disclosed, not hidden: winner identity is now public from the moment of assignment, rather than staying private until claim. Funding privacy and winner-selection privacy (nobody can predict a slot's destination before the organizer assigns it) are unaffected — this narrows the privacy window at the very end of the flow, it doesn't remove it.
+
+## Privacy model and current limitations
+
+- Funding can originate from a shielded STRK20 balance, but GameShield does not provide full transaction unlinkability or hide amount/timing correlation.
+- Campaign IDs, token addresses, reward pots, deadlines, winner addresses, slot amounts, assignments, claims, and refunds are all public on-chain data.
+- Winner identity is public from the moment the organizer assigns a slot (see above).
+- The contract performs no on-chain game verification or eligibility check — the organizer selects winners from the application list.
+- Wallet sign-in uses a Starknet signature-based session before any protected organizer action or backend write.
+- Campaign descriptions and participant applications are stored off-chain (Supabase). Winner slots and payment state are authoritative on-chain.
 
 ## Features
 
-- **Private rewards** — Fund = private `deposit` of the reward amount, Payout = private `transfer` of the reward amount to the winner. No `OPEN` literal, no invoke actions: these are the action variants every STRK20 wallet implements (verified by on-mainnet probes).
-- **Multi-token rewards** — the campaign registry stores the reward token on-chain; the dapp supports 10 major Starknet tokens with correct decimals.
-- **On-chain title** — title, places and description are committed to the registry (`criteria_hash`) so the campaign metadata survives across browsers; full discovery still requires a metadata indexer.
-- **Wallet compatibility** — Ready X and Xverse support the STRK20 Wallet API (deposit / transfer / withdraw). Braavos and MetaMask do not — they can create and complete campaigns but cannot perform private payouts; the dapp degrades gracefully.
+- **Multiple winners** — each campaign can have any number of independently-sized winner slots.
+- **Direct claims** — a winner claims with one ordinary Starknet account transaction; the contract checks the caller against `winner_address`, nothing else.
+- **Multi-token rewards** — the frontend supports STRK, ETH, USDC, USDT, DAI, WBTC, wstETH, xSTRK, LORDS, and EKUBO, with token-specific decimal handling.
+- **Permissionless timeout recovery** — anyone can sweep unallocated funds after the assignment grace period, or an unclaimed slot after its expiry window.
+- **Organizer refunds** — the organizer drains the accumulated refund pool directly to their own address, any time after funds land there.
+- **Applicant flow** — participants apply with their connected wallet; organizers assign winner slots from that applicant list.
+- **Wallet compatibility** — a STRK20-capable wallet is required for funding. Claims, winner assignment, and refunds are ordinary account transactions, so any standard Starknet wallet works for those.
 
 ## Architecture
 
 | Component | Role |
 | --- | --- |
-| `contracts/` | Cairo contracts: campaign registry (multi-token) + payout helper (helper is **not used by the live v2 flow**; kept for reference) |
-| `apps/web` | Next.js dapp: browse, create, fund, send private reward |
+| `contracts/src/gameshield.cairo` | Current GameShield contract: campaign lifecycle, funding, winner slots, direct claims, timeout sweeps, refunds. |
+| `contracts/tests/test_gameshield.cairo` | Starknet Foundry tests: validation, permissions, funding, winner assignment, claims, refunds, solvency, timeout paths. |
+| `apps/web` | Next.js frontend: campaign discovery, wallet connection, signature sign-in, applications, funding, winner assignment, claims, refunds. |
+| Supabase | Off-chain storage for campaign descriptions and participant applications. |
 
-> **v2 flow note:** the v2 dapp uses direct STRK20 `deposit` / `transfer` actions on the privacy pool and bypasses the PayoutHelper contract in the live flow (the `paid` flag on the registry is therefore never set on-chain; the privacy-invoke path was hindered by Ready X not supporting the `OPEN` literal / invoke actions). The PayoutHelper contract is still deployed and remains in the repository for reference, but the live v2 flow does not call it.
->
-> **SEC-01 honesty note (added 2026-08-19):** the dapp performs a direct STRK20 `transfer` from the organizer's shielded note to the winner. The registry's `paid` flag is therefore **advisory (informational)** and may be inconsistent with actual settlement. The dapp UI labels the payout action "Send private reward" and shows the advisory note in the receipt and on completed-but-unpaid campaign cards. Treat the `paid` flag as a hint, not as proof of payment.
+Earlier contract iterations (`contracts/src/campaign_registry.cairo`, `contracts/src/payout_helper.cairo`) are kept for reference only — they are not part of the current payout flow.
 
-### Onchain flow (one STRK20 transaction per action)
+## On-chain flow
 
+Funding is submitted by a STRK20-capable wallet as one transaction with a withdraw action and a contract invoke:
+
+```ts
+fund: [
+  { type: "withdraw", token, amount, recipient: gameshieldAddress },
+  {
+    type: "invoke",
+    contract: gameshieldAddress,
+    calldata: [campaignId, token, amount],
+  },
+]
 ```
-fund:         wallet.strk20InvokeTransaction([{ deposit, token, amount }])
-payout:       wallet.strk20InvokeTransaction([{ transfer, token, amount, recipient }])
-```
 
-The dapp never touches viewing keys — the wallet (Wallet API 0.10.3+, e.g. Ready, Xverse) manages notes, proofs, and submission via `starknet.js` `WalletAccountV6` (`strk20InvokeTransaction`).
+The invoke calldata matches `privacy_invoke(campaign_id, token, amount)`. This only ever funds a campaign now — it returns an empty `Span<OpenNoteDeposit>`, since claims no longer route through the pool at all.
 
-> **Note:** PayoutHelper is a reference implementation kept deployed for future escrow/v2.5 work; the live flow uses direct STRK20 transfer.
+Winner assignment: `add_winner(campaign_id, amount, winner_address)`.
+Claiming: `claim_winner(campaign_id, slot_id)` — the caller must be `winner_address`; the contract pays out directly.
+Refunds: `claim_refund(campaign_id)` — organizer-only, drains `refund_pool` to the organizer's own address.
 
-## Sprint artifacts
+All three are plain account transactions. The frontend uses `starknet.js`'s `WalletAccountV6` and the STRK20 Wallet API only for the funding step; GameShield never accesses wallet viewing keys or private note data.
 
-- `strk20.json` — mainnet transactions, contracts, demo links (filled as they exist).
-- `docs/strk20-integration.md` — integration research, mainnet parameters, transaction plan.
+## Deployment (mainnet)
 
-## On-chain deployment (mainnet)
+GameShield contract: `0x075a60637214544e9aae248355da84aef5819bf1830308451eb5ceeb10e040fc`
 
-Campaign registry and payout helper are deployed fresh per redeploy; the dapp accepts the most recently declared class hashes plus the v1/v2 historical hashes. Deploy from the dapp's Developer settings, or paste already-deployed addresses. The dapp's `Save addresses` flow verifies via ABI (`get_campaign_count` on the registry, `privacy_invoke` on the helper) and falls back to class-hash matching against the v1 STRK-only and v2 multi-token hashes when the ABI cannot be fetched.
+## Getting started
 
-| Component | Address |
-| --- | --- |
-| CampaignRegistry (v2) | deployed from dapp |
-| PayoutHelper (reference, informational) | deployed from dapp (live v2 flow does not call it) |
+### Contracts
 
-## Verify locally
-
-The contracts require Scarb `2.18.0` and Starknet Foundry `0.60.0`:
+Requires Scarb `2.18.0`. `snforge_std` is pinned to `v0.60.0`:
 
 ```bash
 cd contracts
-scarb --version
+scarb build
 snforge test
 ```
 
-Expected result: 10 tests passed. `scarb test` is not the project test command; use `snforge test` so the integration tests under `contracts/tests` are collected.
+### Frontend
+
+```env
+NEXT_PUBLIC_GAMESHIELD_CONTRACT_ADDRESS=...
+NEXT_PUBLIC_STRK20_POOL_ADDRESS=...
+NEXT_PUBLIC_STARKNET_RPC_URL=...
+SUPABASE_URL=...
+SUPABASE_SERVICE_ROLE_KEY=...
+```
+
+`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are server-side only and back campaign descriptions and applications — the app needs both to run.
+
+```bash
+cd apps/web
+npx tsc --noEmit
+npm run build
+npm run dev
+```
 
 ## Status
 
-- [x] PHASE 1 — discover (integration route chosen: Starknet Wallet API, direct pool actions)
-- [x] PHASE 2 — GitHub repo + skeleton + registration PR (#86, blocked by a dead registry entry on the sprint repo — not ours)
-- [x] PHASE 3 — Cairo prototype (multi-token campaign registry + payout helper); unit tests are mock-based
-- [x] PHASE 4 — web app (Next.js on the STRK20 starter kit base) — **live: https://gameshield-dapp.vercel.app**
-- [x] PHASE 5a — probe on mainnet: deposit / transfer / withdraw accepted, `OPEN` literal not implemented by Ready
-- [ ] PHASE 5b — three qualifying mainnet STRK20 pool transactions with the v2 flow (deposit fund + private payout + unshield); the wallet holds ~3,895 STRK and is ready
-- [ ] PHASE 6 — demo video + submission (strk20.json `transactions` / `demo_video`)
+- [x] Public-address winner assignment and direct claim flow.
+- [x] Multiple winner slots with per-slot reward amounts.
+- [x] STRK20 wallet funding through withdraw plus deposit-only invoke.
+- [x] Permissionless unallocated-fund and expired-slot sweeps.
+- [x] Organizer refund-pool claims.
+- [x] Applicant flow and organizer applicant picker.
+- [x] Signature-based wallet sessions for protected actions.
+- [x] Mainnet deployment.
 
 ## License
 
