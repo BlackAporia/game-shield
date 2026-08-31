@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { Inter, Space_Grotesk, JetBrains_Mono } from 'next/font/google'
 import './globals.css'
+import AppChrome from './components/layout/AppChrome'
 
 // Matches starknet-gaming.com: Inter for UI, Space Grotesk for display,
 // JetBrains Mono for addresses / hashes.
@@ -22,9 +23,9 @@ const jetbrains = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'GameShield · Private Gaming Bounty Hub',
+  title: 'GameShield · STRK20 Gaming Bounty Hub',
   description:
-    'Create public gaming campaigns and deliver rewards through STRK20 shielded notes on Starknet.',
+    'Create gaming campaigns, assign multiple reward slots, and pay winners directly on Starknet with STRK20 funding.',
 }
 
 export default function RootLayout({
@@ -38,7 +39,7 @@ export default function RootLayout({
       className={`${inter.variable} ${grotesk.variable} ${jetbrains.variable}`}
       suppressHydrationWarning
     >
-      <body>{children}</body>
+      <body><AppChrome>{children}</AppChrome></body>
     </html>
   )
 }
