@@ -1,6 +1,6 @@
 "use client";
 import { create } from "zustand";
-import { ProviderInterface, AccountInterface, type WalletAccountV6 } from "starknet";
+import { ProviderInterface, type WalletAccountV6 } from "starknet";
 import { type WalletWithStarknetFeatures } from "@starknet-io/get-starknet-wallet-standard/features";
 
 
@@ -15,8 +15,6 @@ export interface WalletState {
     setChain: (chain: string) => void,
     myWalletAccount: WalletAccountV6|undefined;
     setMyWalletAccount: (myWAccount:WalletAccountV6)=>void;
-    account: AccountInterface | undefined,
-    setAccount: (account: AccountInterface) => void,
     provider: ProviderInterface | undefined,
     setProvider: (provider: ProviderInterface) => void,
     isConnected: boolean,
@@ -28,8 +26,11 @@ export interface WalletState {
     setWalletApiList: (version: string[]) => void,
 selectedApiVersion: string,
     setSelectedApiVersion: (version: string) => void,
-    strk20Supported: boolean,
-    setStrk20Supported: (supported: boolean) => void,
+    strk20Supported: boolean | undefined,
+    setStrk20Supported: (supported: boolean | undefined) => void,
+    authStatus: "idle" | "verifying" | "verified" | "error",
+    authError: string,
+    setAuthStatus: (status: WalletState["authStatus"], error?: string) => void,
 
 }
 
@@ -42,8 +43,6 @@ export const useStoreWallet = create<WalletState>()(set => ({
     setChain: (chain: string) => { set(state => ({ chain })) },
     myWalletAccount: undefined,
     setMyWalletAccount: (myWAccount: WalletAccountV6) => { set(state => ({ myWalletAccount: myWAccount })) },
-    account: undefined,
-    setAccount: (account: AccountInterface) => { set(state => ({ account })) },
     provider: undefined,
     setProvider: (provider: ProviderInterface) => { set(state => ({ provider })) },
     isConnected: false,
@@ -54,11 +53,12 @@ export const useStoreWallet = create<WalletState>()(set => ({
             address: "",
             chain: "",
             myWalletAccount: undefined,
-            account: undefined,
             provider: undefined,
             isConnected: false,
             walletApiList: [],
-            strk20Supported: false,
+            strk20Supported: undefined,
+            authStatus: "idle",
+            authError: "",
         })
     },
     displaySelectWalletUI: false,
@@ -67,6 +67,9 @@ export const useStoreWallet = create<WalletState>()(set => ({
     setWalletApiList: (walletApi: string[]) => { set(state => ({ walletApiList: walletApi })) },
     selectedApiVersion: "default",
     setSelectedApiVersion: (selectedApiVersion: string) => { set(state => ({ selectedApiVersion })) },
-    strk20Supported: false,
-    setStrk20Supported: (supported: boolean) => { set(state => ({ strk20Supported: supported })) },
+    strk20Supported: undefined,
+    setStrk20Supported: (supported: boolean | undefined) => { set(state => ({ strk20Supported: supported })) },
+    authStatus: "idle",
+    authError: "",
+    setAuthStatus: (authStatus, authError = "") => set({ authStatus, authError }),
     }));
