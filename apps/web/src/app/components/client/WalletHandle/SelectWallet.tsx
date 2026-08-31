@@ -1,11 +1,10 @@
 "use client";
 import styles from "../../../uni.module.css";
 import { useStoreWallet } from "../../Wallet/walletContext";
-import { useFrontendProvider } from "../provider/providerContext";
 import { useEffect, useState } from "react";
 import { walletV6, validateAndParseAddress, constants as SNconstants, compareVersions, WalletAccountV6 } from "starknet";
 import { WALLET_API } from "@starknet-io/types-js";
-import { myFrontendProviders } from "@/utils/constants";
+import { myFrontendProvider } from "@/utils/constants";
 import { createStore, type Store } from "@starknet-io/get-starknet-discovery";
 import type {
   WalletWithStarknetFeatures,
@@ -34,8 +33,6 @@ export default function SelectWallet({ variant = "ctaBig" }: { variant?: "nav" |
   const setMyWallet = useStoreWallet(state => state.setMyStarknetWalletObject);
 
   const setMyWalletAccount = useStoreWallet(state => state.setMyWalletAccount);
-  const myFrontendProviderIndex = useFrontendProvider(state => state.currentFrontendProviderIndex);
-  const { setCurrentFrontendProviderIndex } = useFrontendProvider(state => state);
 
   const isConnected = useStoreWallet(state => state.isConnected);
   const setConnected = useStoreWallet(state => state.setConnected);
@@ -43,6 +40,9 @@ export default function SelectWallet({ variant = "ctaBig" }: { variant?: "nav" |
   const address = useStoreWallet(state => state.address);
   const strk20Supported = useStoreWallet(state => state.strk20Supported);
   const setStrk20Supported = useStoreWallet(state => state.setStrk20Supported);
+  const setAuthStatus = useStoreWallet(state => state.setAuthStatus);
+  const authStatus = useStoreWallet(state => state.authStatus);
+  const authError = useStoreWallet(state => state.authError);
 
   const setWalletApi = useStoreWallet(state => state.setWalletApiList);
 
@@ -52,17 +52,28 @@ export default function SelectWallet({ variant = "ctaBig" }: { variant?: "nav" |
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string>("");
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [authErrorDismissed, setAuthErrorDismissed] = useState(false);
   // Detected Starknet wallets, in render state so the picker updates as wallets register.
   const [wallets, setWallets] = useState<WalletWithStarknetFeatures[]>([]);
+  const [lastWallet, setLastWallet] = useState<WalletWithStarknetFeatures | undefined>();
+
+  useEffect(() => {
+    if (authStatus === "error") setAuthErrorDismissed(false);
+  }, [authStatus]);
 
   // Create the discovery store once on mount so wallets have time to register
   // before the user opens the picker. eip1193Adapters:[] keeps MetaMask out entirely
   // (no EIP-6963 MetaMask bridging / Snap probing).
   useEffect(() => {
-    const store: Store = createStore({ eip1193Adapters: [] });
-    setWallets(store.getWallets().slice());
-    const unsub = store.subscribe((next) => setWallets(next.slice()));
-    return () => unsub();
+    try {
+      const store: Store = createStore({ eip1193Adapters: [] });
+      setWallets(store.getWallets().slice());
+      const unsub = store.subscribe((next) => setWallets(next.slice()));
+      return () => unsub();
+    } catch (err: any) {
+      setError(err?.message?.toLowerCase().includes("locked") ? "Unlock your wallet extension and try again." : err?.message ?? "Could not discover a wallet extension.");
+      return undefined;
+    }
   }, []);
 
   // Show every native Starknet wallet except MetaMask. Wallet API and STRK20
@@ -76,23 +87,48 @@ export default function SelectWallet({ variant = "ctaBig" }: { variant?: "nav" |
   // the zustand store with a WalletAccountV6 + account/chain/permissions.
   async function handleSelectedWallet(selectedWallet: WalletWithStarknetFeatures) {
     setMyWallet(selectedWallet); // zustand
+    setStrk20Supported(undefined);
     const result = await walletV6.requestAccounts(selectedWallet);
     if (typeof (result) == "string") {
       throw new Error("This wallet is not compatible.");
     }
+    if (!Array.isArray(result) || !result[0]) throw new Error("This wallet did not return an account.");
+    const addr = validateAndParseAddress(result[0]);
     if (Array.isArray(result)) {
-      const addr = validateAndParseAddress(result[0]);
       setAddressAccount(addr); // zustand
     }
     const isConnectedWallet: boolean = await walletV6.getPermissions(selectedWallet).then((res: any) => (res as WALLET_API.Permission[]).includes(WALLET_API.Permission.ACCOUNTS));
     setConnected(isConnectedWallet); // zustand
     if (isConnectedWallet) {
       const chainId = (await walletV6.requestChainId(selectedWallet)) as string;
-      const providerIndex = chainId === SNconstants.StarknetChainId.SN_MAIN ? 0 : 1;
-      const myWA = await WalletAccountV6.connect(myFrontendProviders[providerIndex], selectedWallet);
+      const myWA = await WalletAccountV6.connect(myFrontendProvider, selectedWallet);
       setMyWalletAccount(myWA);
       setChain(chainId);
-      setCurrentFrontendProviderIndex(providerIndex);
+
+      setAuthStatus("verifying");
+      try {
+        const challengeResponse = await fetch("/api/auth/challenge", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ address: addr }),
+        });
+        const challenge = await challengeResponse.json();
+        if (!challengeResponse.ok) throw new Error(challenge.error ?? "Could not create sign-in challenge.");
+
+        console.log("[SIWE] signing nonce:", challenge.message.message.nonce, "length:", challenge.message.message.nonce.length);
+        const signature = await myWA.signMessage(challenge.message);
+        const verifyResponse = await fetch("/api/auth/verify", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ address: addr, signature }),
+        });
+        const verification = await verifyResponse.json();
+        if (!verifyResponse.ok) throw new Error(verification.error ?? "Wallet sign-in failed.");
+        setAuthStatus("verified");
+      } catch (authError: any) {
+        setAuthStatus("error", authError?.message ?? "Wallet sign-in failed.");
+        throw authError;
+      }
     }
     setWalletApi(await walletV6.supportedSpecs(selectedWallet));
     try {
@@ -119,6 +155,7 @@ export default function SelectWallet({ variant = "ctaBig" }: { variant?: "nav" |
   async function selectWallet(w: WalletWithStarknetFeatures) {
     setError("");
     setConnecting(true);
+    setLastWallet(w);
     try {
       await handleSelectedWallet(w);
       setPickerOpen(false);
@@ -129,7 +166,43 @@ export default function SelectWallet({ variant = "ctaBig" }: { variant?: "nav" |
     }
   }
 
+  async function retryAuth() {
+    if (!lastWallet || connecting) return;
+    setError("");
+    setConnecting(true);
+    try {
+      await handleSelectedWallet(lastWallet);
+    } catch (err: any) {
+      setError(err?.message ?? "Wallet connection failed.");
+    } finally {
+      setConnecting(false);
+    }
+  }
+
   const shortAddr = address ? `${address.slice(0, 6)}…${address.slice(-4)}` : "";
+
+  const authIndicator = authStatus === "verifying" ? (
+    <span className={styles.hint} role="status" aria-live="polite">Verifying wallet…</span>
+  ) : authStatus === "verified" ? (
+    <span className={styles.hint} role="status" aria-live="polite">Signed in</span>
+  ) : null;
+
+  const authToast = authStatus === "error" && !authErrorDismissed ? (
+    <div className={`${styles.warn} ${styles.authToast}`} role="alert" aria-live="assertive">
+      <span>
+        Sign-in failed — {authError || "please try again."}{" "}
+        <button type="button" className={styles.footerLink} onClick={retryAuth} disabled={connecting}>Click to retry</button>
+      </span>
+      <button
+        type="button"
+        className={styles.modalClose}
+        onClick={() => setAuthErrorDismissed(true)}
+        aria-label="Dismiss sign-in error"
+      >
+        ×
+      </button>
+    </div>
+  ) : null;
 
   const picker = pickerOpen ? (
     <div className={styles.modalOverlay} onClick={() => !connecting && setPickerOpen(false)}>
@@ -179,25 +252,29 @@ export default function SelectWallet({ variant = "ctaBig" }: { variant?: "nav" |
   if (variant === "nav") {
     if (isConnected && address) {
       return (
-        <div className={styles.walletPanel}>
-          <button
-            className={styles.addrPill}
-            onClick={resetWallet}
-            title="Disconnect"
-          >
-            <span className={styles.addrDot} />
-            {shortAddr}
-            <span className={styles.addrDisconnect}>Disconnect</span>
-          </button>
-          {strk20Supported === false ? (
-            <span
-              className={styles.strk20Warn}
-              title="This wallet does not advertise STRK20 Wallet API methods. Fund and Payout are disabled; Create and Complete still work."
+        <>
+          <div className={styles.walletPanel}>
+            <button
+              className={styles.addrPill}
+              onClick={resetWallet}
+              title="Disconnect"
             >
-              STRK20 not supported — Fund/Payout disabled
-            </span>
-          ) : null}
-        </div>
+              <span className={styles.addrDot} />
+              {shortAddr}
+              <span className={styles.addrDisconnect}>Disconnect</span>
+            </button>
+            {strk20Supported === false ? (
+              <span
+                className={styles.strk20Warn}
+              title="This wallet does not advertise STRK20 Wallet API methods. Campaign funding is disabled; claims and organizer actions still work."
+              >
+                STRK20 not supported — Funding disabled
+              </span>
+            ) : null}
+            {authIndicator}
+          </div>
+          {authToast}
+        </>
       );
     }
     return (
@@ -214,6 +291,8 @@ export default function SelectWallet({ variant = "ctaBig" }: { variant?: "nav" |
   // wallet is connected.
   return (
     <>
+      {authIndicator}
+      {authToast}
       <button className={styles.btnCta} onClick={openPicker}>
         Connect a Wallet
       </button>
