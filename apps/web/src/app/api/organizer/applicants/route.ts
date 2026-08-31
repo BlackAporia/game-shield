@@ -1,0 +1,2 @@
+import { json, supabase } from "../../_lib/server";
+export async function GET(req:Request){const id=new URL(req.url).searchParams.get("campaign_id");if(!id)return json({error:"campaign_id is required"},400);try{return json(await supabase(`applications?campaign_id=eq.${encodeURIComponent(id)}&select=id,campaign_id,applicant_address,applied_at&order=applied_at.asc`));}catch(e:any){return json({error:e.message},500);}}
