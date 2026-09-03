@@ -1,10 +1,19 @@
-import { activeChainId, challenge, CHALLENGE_TTL_SECONDS, json } from "../../_lib/server";
+import { activeChainId, challenge, CHALLENGE_TTL_SECONDS } from "../../_lib/server";
+
+const jsonResponse = (body: unknown, status = 200, extraHeaders: Record<string, string> = {}) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "content-type": "application/json",
+      ...extraHeaders,
+    },
+  });
 
 export async function POST(req: Request) {
   let body: { address?: string; format?: "typed-data" | "plain" } = {};
-  try { body = await req.json(); } catch { return json({ error: "Body must be JSON." }, 400); }
+  try { body = await req.json(); } catch { return jsonResponse({ error: "Body must be JSON." }, 400); }
   const { address, format } = body;
-  if (!address || typeof address !== "string") return json({ error: "address is required" }, 400);
+  if (!address || typeof address !== "string") return jsonResponse({ error: "address is required" }, 400);
 
   const wantsTyped = format !== "plain";
   const c = challenge(address);
@@ -19,13 +28,14 @@ export async function POST(req: Request) {
     `Expires At: ${new Date(c.expires).toISOString()}`,
   ].join("\n");
 
+  const cookieValue = `gameshield_challenge=${encodeURIComponent(Buffer.from(c.payload).toString("base64url") + "." + c.signature)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${CHALLENGE_TTL_SECONDS}`;
+
   if (!wantsTyped) {
-    const response = json({ success: true, envelope: { kind: "plain" }, message: plainMessage, expires: c.expires });
-    response.headers.set(
-      "Set-Cookie",
-      `gameshield_challenge=${encodeURIComponent(Buffer.from(c.payload).toString("base64url") + "." + c.signature)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${CHALLENGE_TTL_SECONDS}`,
+    return jsonResponse(
+      { success: true, envelope: { kind: "plain" }, message: plainMessage, expires: c.expires },
+      200,
+      { "set-cookie": cookieValue },
     );
-    return response;
   }
 
   // SNIP-12 typed envelope — preferred path for Braavos / Argent / Xverse.
@@ -45,10 +55,15 @@ export async function POST(req: Request) {
     },
     message: { nonce: c.nonce, expires: c.expires.toString() },
   };
-  const response = json({ success: true, envelope: { kind: "typed-data" }, message, expires: c.expires, fallback: { kind: "plain", message: plainMessage } });
-  response.headers.set(
-    "Set-Cookie",
-    `gameshield_challenge=${encodeURIComponent(Buffer.from(c.payload).toString("base64url") + "." + c.signature)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${CHALLENGE_TTL_SECONDS}`,
+  return jsonResponse(
+    {
+      success: true,
+      envelope: { kind: "typed-data" },
+      message,
+      expires: c.expires,
+      fallback: { kind: "plain", message: plainMessage },
+    },
+    200,
+    { "set-cookie": cookieValue },
   );
-  return response;
 }
