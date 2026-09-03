@@ -115,12 +115,34 @@ export default function SelectWallet({ variant = "ctaBig" }: { variant?: "nav" |
         const challenge = await challengeResponse.json();
         if (!challengeResponse.ok) throw new Error(challenge.error ?? "Could not create sign-in challenge.");
 
-        console.log("[SIWE] signing nonce:", challenge.message.message.nonce, "length:", challenge.message.message.nonce.length);
-        const signature = await myWA.signMessage(challenge.message);
+        // Try the wallet's preferred envelope first; if it refuses (Ready X
+        // returns "Action failed" for shortstring typed-data), fall back to
+        // the plain-text envelope that the challenge response already
+        // included alongside the typed one.
+        const envelopeKind = challenge.envelope?.kind ?? "typed-data";
+        const messageToSign = envelopeKind === "plain" ? challenge.message : challenge.message;
+        let signature: string[];
+        let signedKind: "typed-data" | "plain" = envelopeKind;
+        try {
+          signature = await myWA.signMessage(messageToSign);
+        } catch (typedError: any) {
+          const fallback = challenge.fallback;
+          if (envelopeKind !== "plain" && fallback?.kind === "plain" && fallback.message) {
+            try {
+              signature = await myWA.signMessage(fallback.message);
+              signedKind = "plain";
+            } catch {
+              throw typedError;
+            }
+          } else {
+            throw typedError;
+          }
+        }
+
         const verifyResponse = await fetch("/api/auth/verify", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ address: addr, signature }),
+          body: JSON.stringify({ address: addr, signature, kind: signedKind }),
         });
         const verification = await verifyResponse.json();
         if (!verifyResponse.ok) throw new Error(verification.error ?? "Wallet sign-in failed.");
